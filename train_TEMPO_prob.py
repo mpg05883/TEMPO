@@ -23,9 +23,9 @@ from models.GPT4TS import GPT4TS
 from models.PatchTST import PatchTST
 from models.T5 import T54TS
 from models.TEMPO import TEMPO
-from utils.tools import (  # test,; visual,
+from utils.tools import (
     EarlyStopping,
-    adjust_learning_rate,
+    adjust_learning_rate,  # test,; visual,
     test_probs,
     vali,
 )

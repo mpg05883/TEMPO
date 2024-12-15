@@ -9,7 +9,7 @@
 
 The official code for [["TEMPO: Prompt-based Generative Pre-trained Transformer for Time Series Forecasting (ICLR 2024)"]](https://arxiv.org/pdf/2310.04948).
 
-TEMPO is one of the very first open source **Time Series Foundation Models** for forecasting task v1.0 version.
+TEMPO is one of the very first open source **Time Series Foundation Models** for forecasting tasks v1.0 version.
 
 <div align="center"><img src=./pics/TEMPO.png width=80% /></div>
 
@@ -80,7 +80,7 @@ print(predicted_values)
 
 ### 1. Reproducing zero-shot experiments on ETTh2:
 
-Please try to reproduc the zero-shot experiments on ETTh2 [[here on Colab]](https://colab.research.google.com/drive/11qGpT7H1JMaTlMlm9WtHFZ3_cJz7p-og?usp=sharing).
+Please try to reproduce the zero-shot experiments on ETTh2 [[here on Colab]](https://colab.research.google.com/drive/11qGpT7H1JMaTlMlm9WtHFZ3_cJz7p-og?usp=sharing).
 
 ### 2. Zero-shot experiments on customer dataset:
 
@@ -130,7 +130,7 @@ Here is the prompts use to generate the coresponding textual informaton of time 
 
 <div align="center"><img src=./pics/TETS_prompt.png width=80% /></div>
 
-The time series data are come from [[S&P 500]](https://www.spglobal.com/spdji/en/indices/equity/sp-500/#overview). Here is the EBITDA case for one company from the dataset:
+The time series data comes from [[S&P 500]](https://www.spglobal.com/spdji/en/indices/equity/sp-500/#overview). Here is the EBITDA case for one company from the dataset:
 
 
 <div align="center"><img src=./pics/Company1_ebitda_summary.png width=80% /></div>
