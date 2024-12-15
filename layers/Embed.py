@@ -2,8 +2,9 @@ import math
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.nn.utils import weight_norm
+
+# import torch.nn.functional as F
+# from torch.nn.utils import weight_norm
 
 
 class PositionalEmbedding(nn.Module):
@@ -200,4 +201,5 @@ class DataEmbedding_wo_time(nn.Module):
 
     def forward(self, x):
         x = self.value_embedding(x) + self.position_embedding(x)
+        return self.dropout(x)
         return self.dropout(x)

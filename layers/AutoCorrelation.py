@@ -1,12 +1,14 @@
 import math
-import os
-from math import sqrt
 
-import matplotlib.pyplot as plt
-import numpy as np
+# import matplotlib.pyplot as plt
+# import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
+# import os
+# from math import sqrt
+
+# import torch.nn.functional as F
 
 
 class AutoCorrelation(nn.Module):
@@ -192,4 +194,5 @@ class AutoCorrelationLayer(nn.Module):
         out, attn = self.inner_correlation(queries, keys, values, attn_mask)
         out = out.view(B, L, -1)
 
+        return self.out_projection(out), attn
         return self.out_projection(out), attn

@@ -1,5 +1,4 @@
 import math
-import random
 
 import torch
 import torch.fft as fft
@@ -7,6 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, reduce, repeat
 from scipy.fftpack import next_fast_len
+
+# import random
 
 
 class Transform:
