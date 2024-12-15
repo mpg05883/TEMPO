@@ -1,17 +1,19 @@
 import os
 import pickle
 import warnings
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
 from sklearn.preprocessing import StandardScaler
 from statsmodels.tsa.seasonal import STL
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 
 from utils.timefeatures import time_features
 from utils.tools import convert_tsf_to_dataframe
+
+# from pathlib import Path
+
 
 warnings.filterwarnings("ignore")
 
@@ -37,7 +39,7 @@ class Dataset_Monash(Dataset):
     ):
         # size [seq_len, label_len, pred_len]
         # info
-        if size == None:
+        if size is None:
             self.seq_len = 24 * 4 * 4
             self.label_len = 24 * 4
             self.pred_len = 24 * 4
@@ -161,7 +163,7 @@ class Dataset_ETT_hour(Dataset):
     ):
         # size [seq_len, label_len, pred_len]
         # info
-        if size == None:
+        if size is None:
             self.seq_len = 24 * 4 * 4
             self.label_len = 24 * 4
             self.pred_len = 24 * 4
@@ -364,7 +366,7 @@ class Dataset_ETT_minute(Dataset):
     ):
         # size [seq_len, label_len, pred_len]
         # info
-        if size == None:
+        if size is None:
             self.seq_len = 24 * 4 * 4
             self.label_len = 24 * 4
             self.pred_len = 24 * 4
@@ -565,7 +567,7 @@ class Dataset_Custom(Dataset):
     ):
         # size [seq_len, label_len, pred_len]
         # info
-        if size == None:
+        if size is None:
             self.seq_len = 24 * 4 * 4
             self.label_len = 24 * 4
             self.pred_len = 24 * 4
@@ -773,7 +775,7 @@ class Dataset_Pred(Dataset):
     ):
         # size [seq_len, label_len, pred_len]
         # info
-        if size == None:
+        if size is None:
             self.seq_len = 24 * 4 * 4
             self.label_len = 24 * 4
             self.pred_len = 24 * 4
