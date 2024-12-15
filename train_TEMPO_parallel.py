@@ -5,14 +5,15 @@ import sys
 import time
 import warnings
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from numpy.random import choice
 from omegaconf import OmegaConf
-from torch import optim
+
+# from torch import optim
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import Subset
 from torch.utils.data.distributed import DistributedSampler
@@ -25,13 +26,10 @@ from models.GPT4TS import GPT4TS
 from models.PatchTST import PatchTST
 from models.T5 import T54TS
 from models.TEMPO import TEMPO
-from utils.tools import (
-    EarlyStopping,
+from utils.tools import (  # EarlyStopping,; adjust_learning_rate,; visual,
     EarlyStopping_dist,
-    adjust_learning_rate,
     test,
     vali,
-    visual,
 )
 
 # def setup(rank, world_size):
@@ -235,7 +233,7 @@ def main(args, config):
     dist.init_process_group(backend="nccl")
     assert (
         args.batch_size % dist.get_world_size() == 0
-    ), f"Batch size must be divisible by world size."
+    ), "Batch size must be divisible by world size."
     rank = dist.get_rank()
     device = rank % torch.cuda.device_count()
     print("rank: ", rank)
@@ -308,7 +306,7 @@ def main(args, config):
         # Assuming you have 4 GPUs
         num_gpus = torch.cuda.device_count()
         # Calculate new effective batch size and learning rate
-        effective_batch_size = args.batch_size * num_gpus
+        # effective_batch_size = args.batch_size * num_gpus
         effective_learning_rate = args.learning_rate * num_gpus
 
         model_optim = torch.optim.Adam(params, lr=effective_learning_rate)
@@ -316,7 +314,7 @@ def main(args, config):
 
         # Implement gradual warmup
         warmup_factor = 1.0 / 1000
-        warmup_iters = 1000
+        # warmup_iters = 1000
 
         def adjust_learning_rate(optimizer, epoch, iteration, num_iter):
             if epoch < 5:  # Warmup for first 5 epochs
@@ -542,4 +540,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     config = get_init_config(args.config_path)
 
+    main(args, config)
     main(args, config)

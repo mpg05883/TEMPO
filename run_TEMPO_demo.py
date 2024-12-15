@@ -1,11 +1,14 @@
 # Third-party library imports
 import numpy as np
 import torch
-from numpy.random import choice
 
 # Local imports
 from models.TEMPO import TEMPO
-from utils.tools import load_data_from_huggingface
+
+# from utils.tools import load_data_from_huggingface
+
+# from numpy.random import choice
+
 
 model = TEMPO.load_pretrained_model(
     device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
@@ -22,4 +25,5 @@ with torch.no_grad():
 print("Predicted values:")
 print(predicted_values)
 
+############################################################################################################
 ############################################################################################################

@@ -5,13 +5,14 @@ import sys
 import time
 import warnings
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 from numpy.random import choice
 from omegaconf import OmegaConf
-from torch import optim
+
+# from torch import optim
 from torch.utils.data import Subset
 from tqdm import tqdm
 
@@ -22,7 +23,7 @@ from models.GPT4TS import GPT4TS
 from models.PatchTST import PatchTST
 from models.T5 import T54TS
 from models.TEMPO import TEMPO
-from utils.tools import EarlyStopping, adjust_learning_rate, test, vali, visual
+from utils.tools import EarlyStopping, adjust_learning_rate, test, vali
 
 
 def get_init_config(config_path=None):
@@ -450,4 +451,5 @@ for ii in range(args.itr):
     mses.append(mse)
     maes.append(mae)
 print("mse_mean = {:.4f}, mse_std = {:.4f}".format(np.mean(mses), np.std(mses)))
+print("mae_mean = {:.4f}, mae_std = {:.4f}".format(np.mean(maes), np.std(maes)))
 print("mae_mean = {:.4f}, mae_std = {:.4f}".format(np.mean(maes), np.std(maes)))

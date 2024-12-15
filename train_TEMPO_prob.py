@@ -5,13 +5,14 @@ import sys
 import time
 import warnings
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 from numpy.random import choice
 from omegaconf import OmegaConf
-from torch import optim
+
+# from torch import optim
 from torch.utils.data import Subset
 from tqdm import tqdm
 
@@ -22,13 +23,11 @@ from models.GPT4TS import GPT4TS
 from models.PatchTST import PatchTST
 from models.T5 import T54TS
 from models.TEMPO import TEMPO
-from utils.tools import (
+from utils.tools import (  # test,; visual,
     EarlyStopping,
     adjust_learning_rate,
-    test,
     test_probs,
     vali,
-    visual,
 )
 
 
@@ -486,4 +485,5 @@ for ii in range(args.itr):
     print("------------------------------------")
     preds, trues = test_probs(model, test_data, test_loader, args, device, ii)
     torch.cuda.empty_cache()
+    print("------------------------------------")
     print("------------------------------------")
