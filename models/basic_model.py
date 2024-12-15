@@ -1,7 +1,9 @@
 # -*- coding = utf-8 -*-
 
 import time
+
 import torch.nn as nn
+
 
 class BasicModel(nn.Module):
     """
@@ -18,7 +20,7 @@ class BasicModel(nn.Module):
         # time.sleep(0.1)
         self.args = configs
         self.device = device
-        #self.data_analysis = DataAnalysis(args=configs, device=self.device)
+        # self.data_analysis = DataAnalysis(args=configs, device=self.device)
 
     def forward(self, *args, **kwargs):
         pass

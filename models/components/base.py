@@ -1,44 +1,55 @@
 """Basic definitions for the transforms module."""
+
 """https://github.com/bayesiains/nsf/blob/master/nde/transforms/base.py"""
+
+from typing import Tuple, Union
 
 import numpy as np
 import torch
 from torch import nn
+
 from . import utils
-from typing import (Tuple,
-                    Union)
+
 
 class InverseNotAvailable(Exception):
     """Exception to be thrown when a transform does not have an inverse."""
+
     pass
 
 
 class InputOutsideDomain(Exception):
     """Exception to be thrown when the input to a transform is not within its domain."""
+
     pass
+
 
 class Namespace(object):
     """Converts dict to class attributes as Argparse"""
+
     def __init__(self, **kwds):
         self.__dict__.update(kwds)
+
     def __repr__(self):
         items = list(self.__dict__.items())
         temp = []
         for name, value in items:
-            if not name.startswith('_'):
-                temp.append('%s=%r' % (name, value))
+            if not name.startswith("_"):
+                temp.append("%s=%r" % (name, value))
         temp.sort()
-        return '%s(%s)' % (self.__class__.__name__, ', '.join(temp))
+        return "%s(%s)" % (self.__class__.__name__, ", ".join(temp))
+
 
 class GroupLinearLayer(nn.Module):
     """GroupLinearLayer computes N dinstinct linear transformations at once"""
+
     def __init__(
-        self, 
-        din: int, 
-        dout: int, 
+        self,
+        din: int,
+        dout: int,
         num_blocks: int,
         diagonal: bool = False,
-        hidden: Union[None, int] = None) -> None:
+        hidden: Union[None, int] = None,
+    ) -> None:
         """Group Linear Layer module
 
         Args:
@@ -63,36 +74,35 @@ class GroupLinearLayer(nn.Module):
                 self.wh = nn.Parameter(0.01 * torch.randn(num_blocks, din, hidden))
                 self.hw = nn.Parameter(0.01 * torch.randn(num_blocks, hidden, dout))
 
-    def forward(
-        self,
-        x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.diagonal:
             w = torch.diag_embed(self.d)
             # x: [BS,num_blocks,din]->[num_blocks,BS,din]
-            x = x.permute(1,0,2)
+            x = x.permute(1, 0, 2)
             x = torch.bmm(x, w)
             # x: [BS,num_blocks,dout]
-            x = x.permute(1,0,2)
+            x = x.permute(1, 0, 2)
         elif self.hidden is None:
-            x = x.permute(1,0,2)
+            x = x.permute(1, 0, 2)
             x = torch.bmm(x, self.w)
             # x: [BS,num_blocks,dout]
-            x = x.permute(1,0,2)
+            x = x.permute(1, 0, 2)
         else:
-            x = x.permute(1,0,2)
+            x = x.permute(1, 0, 2)
             # x: [num_blocks,BS,din]->[num_blocks,BS,hidden]
-            x = torch.bmm(x, self.wh)           
-            x = torch.bmm(x, self.hw)  
-            x = x.permute(1,0,2)
+            x = torch.bmm(x, self.wh)
+            x = torch.bmm(x, self.hw)
+            x = x.permute(1, 0, 2)
         return x
-    
+
     def get_weight_matrix(self):
         if self.diagonal:
             return torch.diag_embed(self.d)
         elif self.hidden is None:
-            return self.w 
+            return self.w
         else:
             return torch.matmul(self.wh, self.hw)
+
 
 class Transform(nn.Module):
     """Base class for all transform objects."""
@@ -105,7 +115,8 @@ class Transform(nn.Module):
 
 
 class FlowSequential(nn.Sequential):
-    """ Container for layers of a normalizing flow """
+    """Container for layers of a normalizing flow"""
+
     def forward(self, x, y):
         sum_log_abs_det_jacobians = 0
         for module in self:
@@ -120,7 +131,7 @@ class FlowSequential(nn.Sequential):
             sum_log_abs_det_jacobians = sum_log_abs_det_jacobians + log_abs_det_jacobian
         return u, sum_log_abs_det_jacobians
 
-        
+
 class CompositeTransform(Transform):
     """Composes several transforms into one, in the order they are given."""
 
@@ -172,7 +183,7 @@ class MultiscaleCompositeTransform(Transform):
             split_dim: dimension along which to split.
         """
         if not utils.is_positive_int(split_dim):
-            raise TypeError('Split dimension must be a positive integer.')
+            raise TypeError("Split dimension must be a positive integer.")
 
         super().__init__()
         self._transforms = nn.ModuleList()
@@ -195,19 +206,26 @@ class MultiscaleCompositeTransform(Transform):
 
         if len(self._transforms) == self._num_transforms:
             raise RuntimeError(
-                'Adding more than {} transforms is not allowed.'.format(self._num_transforms))
+                "Adding more than {} transforms is not allowed.".format(
+                    self._num_transforms
+                )
+            )
 
         if (self._split_dim - 1) >= len(transform_output_shape):
-            raise ValueError('No split_dim in output shape')
+            raise ValueError("No split_dim in output shape")
 
         if transform_output_shape[self._split_dim - 1] < 2:
-            raise ValueError('Size of dimension {} must be at least 2.'.format(self._split_dim))
+            raise ValueError(
+                "Size of dimension {} must be at least 2.".format(self._split_dim)
+            )
 
         self._transforms.append(transform)
 
         if len(self._transforms) != self._num_transforms:  # Unless last transform.
             output_shape = list(transform_output_shape)
-            output_shape[self._split_dim - 1] = (output_shape[self._split_dim - 1] + 1) // 2
+            output_shape[self._split_dim - 1] = (
+                output_shape[self._split_dim - 1] + 1
+            ) // 2
             output_shape = tuple(output_shape)
 
             hidden_shape = list(transform_output_shape)
@@ -223,10 +241,12 @@ class MultiscaleCompositeTransform(Transform):
 
     def forward(self, inputs, context=None):
         if self._split_dim >= inputs.dim():
-            raise ValueError('No split_dim in inputs.')
+            raise ValueError("No split_dim in inputs.")
         if self._num_transforms != len(self._transforms):
-            raise RuntimeError('Expecting exactly {} transform(s) '
-                               'to be added.'.format(self._num_transforms))
+            raise RuntimeError(
+                "Expecting exactly {} transform(s) "
+                "to be added.".format(self._num_transforms)
+            )
 
         batch_size = inputs.shape[0]
 
@@ -235,9 +255,9 @@ class MultiscaleCompositeTransform(Transform):
 
             for i, transform in enumerate(self._transforms[:-1]):
                 transform_outputs, logabsdet = transform(hiddens, context)
-                outputs, hiddens = torch.chunk(transform_outputs,
-                                               chunks=2,
-                                               dim=self._split_dim)
+                outputs, hiddens = torch.chunk(
+                    transform_outputs, chunks=2, dim=self._split_dim
+                )
                 assert outputs.shape[1:] == self._output_shapes[i]
                 yield outputs, logabsdet
 
@@ -257,10 +277,12 @@ class MultiscaleCompositeTransform(Transform):
 
     def inverse(self, inputs, context=None):
         if inputs.dim() != 2:
-            raise ValueError('Expecting NxD inputs')
+            raise ValueError("Expecting NxD inputs")
         if self._num_transforms != len(self._transforms):
-            raise RuntimeError('Expecting exactly {} transform(s) '
-                               'to be added.'.format(self._num_transforms))
+            raise RuntimeError(
+                "Expecting exactly {} transform(s) "
+                "to be added.".format(self._num_transforms)
+            )
 
         batch_size = inputs.shape[0]
 
@@ -271,7 +293,7 @@ class MultiscaleCompositeTransform(Transform):
 
         split_inputs = []
         for i in range(len(self._output_shapes)):
-            flat_input = inputs[:, split_indices[i]:split_indices[i+1]]
+            flat_input = inputs[:, split_indices[i] : split_indices[i + 1]]
             split_inputs.append(flat_input.view(-1, *self._output_shapes[i]))
         rev_split_inputs = split_inputs[::-1]
 
@@ -281,7 +303,9 @@ class MultiscaleCompositeTransform(Transform):
         hiddens, logabsdet = rev_inv_transforms[0](rev_split_inputs[0], context)
         total_logabsdet += logabsdet
 
-        for inv_transform, input_chunk in zip(rev_inv_transforms[1:], rev_split_inputs[1:]):
+        for inv_transform, input_chunk in zip(
+            rev_inv_transforms[1:], rev_split_inputs[1:]
+        ):
             tmp_concat_inputs = torch.cat([input_chunk, hiddens], dim=self._split_dim)
             hiddens, logabsdet = inv_transform(tmp_concat_inputs, context)
             total_logabsdet += logabsdet

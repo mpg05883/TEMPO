@@ -2,12 +2,13 @@
 
 import numpy as np
 import torch
-
-from torch import nn
-from torch.nn import functional as F, init
-
 from LiLY.modules import components
+from torch import nn
+from torch.nn import functional as F
+from torch.nn import init
+
 from . import utils
+
 
 class LinearCache(object):
     """Helper class to store the cache of a linear transform.
@@ -31,7 +32,7 @@ class Linear(components.Transform):
 
     def __init__(self, features, using_cache=False):
         if not utils.is_positive_int(features):
-            raise TypeError('Number of features must be a positive integer.')
+            raise TypeError("Number of features must be a positive integer.")
         super().__init__()
 
         self.features = features
@@ -71,7 +72,9 @@ class Linear(components.Transform):
 
     def _check_inverse_cache(self):
         if self.cache.inverse is None and self.cache.logabsdet is None:
-            self.cache.inverse, self.cache.logabsdet = self.weight_inverse_and_logabsdet()
+            self.cache.inverse, self.cache.logabsdet = (
+                self.weight_inverse_and_logabsdet()
+            )
 
         elif self.cache.inverse is None:
             self.cache.inverse = self.weight_inverse()
@@ -87,7 +90,7 @@ class Linear(components.Transform):
 
     def use_cache(self, mode=True):
         if not utils.is_bool(mode):
-            raise TypeError('Mode must be boolean.')
+            raise TypeError("Mode must be boolean.")
         self.using_cache = mode
 
     def weight_and_logabsdet(self):
@@ -185,7 +188,7 @@ class NaiveLinear(Linear):
 
     def weight(self):
         """Cost:
-            weight = O(1)
+        weight = O(1)
         """
         return self._weight
 
@@ -219,6 +222,7 @@ class NaiveLinear(Linear):
             D = num of features
         """
         return utils.logabsdet(self._weight)
+
 
 class LULinear(Linear):
     """A linear transform where we parameterize the LU decomposition of the weights."""
@@ -258,7 +262,7 @@ class LULinear(Linear):
         lower = self.lower_entries.new_zeros(self.features, self.features)
         lower[self.lower_indices[0], self.lower_indices[1]] = self.lower_entries
         # The diagonal of L is taken to be all-ones without loss of generality.
-        lower[self.diag_indices[0], self.diag_indices[1]] = 1.
+        lower[self.diag_indices[0], self.diag_indices[1]] = 1.0
 
         upper = self.upper_entries.new_zeros(self.features, self.features)
         upper[self.upper_indices[0], self.upper_indices[1]] = self.upper_entries
@@ -290,8 +294,12 @@ class LULinear(Linear):
         """
         lower, upper = self._create_lower_upper()
         outputs = inputs - self.bias
-        outputs, _ = torch.triangular_solve(outputs.t(), lower, upper=False, unitriangular=True)
-        outputs, _ = torch.triangular_solve(outputs, upper, upper=True, unitriangular=False)
+        outputs, _ = torch.triangular_solve(
+            outputs.t(), lower, upper=False, unitriangular=True
+        )
+        outputs, _ = torch.triangular_solve(
+            outputs, upper, upper=True, unitriangular=False
+        )
         outputs = outputs.t()
 
         logabsdet = -self.logabsdet()
@@ -316,8 +324,12 @@ class LULinear(Linear):
         """
         lower, upper = self._create_lower_upper()
         identity = torch.eye(self.features, self.features).to(lower.device)
-        lower_inverse, _ = torch.triangular_solve(identity, lower, upper=False, unitriangular=True)
-        weight_inverse, _ = torch.triangular_solve(lower_inverse, upper, upper=True, unitriangular=False)
+        lower_inverse, _ = torch.triangular_solve(
+            identity, lower, upper=False, unitriangular=True
+        )
+        weight_inverse, _ = torch.triangular_solve(
+            lower_inverse, upper, upper=True, unitriangular=False
+        )
         return weight_inverse
 
     @property

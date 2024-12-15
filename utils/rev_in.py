@@ -26,11 +26,11 @@ class RevIn(nn.Module):
             self._init_params()
 
     def forward(self, x, mode: str):
-        if mode == 'norm':
+        if mode == "norm":
             self._get_statistics(x)
             x = self._normalize(x)
 
-        elif mode == 'denorm':
+        elif mode == "denorm":
             x = self._denormalize(x)
 
         else:
@@ -49,7 +49,9 @@ class RevIn(nn.Module):
             self.last = x[:, -1, :].unsqueeze(1)
         else:
             self.mean = torch.mean(x, dim=dim2reduce, keepdim=True).detach()
-        self.stdev = torch.sqrt(torch.var(x, dim=dim2reduce, keepdim=True, unbiased=False) + self.eps).detach()
+        self.stdev = torch.sqrt(
+            torch.var(x, dim=dim2reduce, keepdim=True, unbiased=False) + self.eps
+        ).detach()
 
     def _normalize(self, x):
         if self.subtract_last:

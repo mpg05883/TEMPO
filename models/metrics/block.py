@@ -1,13 +1,13 @@
-from sklearn import metrics
-from sklearn.model_selection import GridSearchCV
-from sklearn import linear_model, kernel_ridge
-from sklearn.preprocessing import scale
-import torch
+from typing import Union
+
+import ipdb as pdb
 import numpy as np
 import scipy as sp
-from typing import Union
+import torch
+from sklearn import kernel_ridge, linear_model, metrics
+from sklearn.model_selection import GridSearchCV
+from sklearn.preprocessing import scale
 from typing_extensions import Literal
-import ipdb as pdb
 
 __Mode = Union[Literal["r2"]]
 
@@ -23,7 +23,19 @@ def _disentanglement(z, hz, mode: __Mode = "r2", reorder=None):
     elif mode == "accuracy":
         return metrics.accuracy_score(z, hz), None
 
-def nonlinear_disentanglement(z, hz, mode: __Mode = "r2", train_test_split=False, alpha=1.0, gamma=None, train_mode=False, model=None, scaler_z=None, scaler_hz=None):
+
+def nonlinear_disentanglement(
+    z,
+    hz,
+    mode: __Mode = "r2",
+    train_test_split=False,
+    alpha=1.0,
+    gamma=None,
+    train_mode=False,
+    model=None,
+    scaler_z=None,
+    scaler_hz=None,
+):
     """Calculate disentanglement up to nonlinear transformations.
 
     Args:
@@ -48,7 +60,7 @@ def nonlinear_disentanglement(z, hz, mode: __Mode = "r2", train_test_split=False
         hz_1 = hz[:n_train]
         z_2 = z[n_train:]
         hz_2 = hz[n_train:]
-        model = kernel_ridge.KernelRidge(kernel='linear', alpha=alpha, gamma=gamma)
+        model = kernel_ridge.KernelRidge(kernel="linear", alpha=alpha, gamma=gamma)
         model.fit(hz_1, z_1)
         hz_2 = model.predict(hz_2)
 
@@ -57,9 +69,15 @@ def nonlinear_disentanglement(z, hz, mode: __Mode = "r2", train_test_split=False
         return inner_result, (z_2, hz_2)
     else:
         if train_mode:
-            model = GridSearchCV(kernel_ridge.KernelRidge(kernel='rbf', gamma=0.1),
-                          param_grid={"alpha": [1e0, 0.1, 1e-2, 1e-3],
-                                      "gamma": np.logspace(-2, 2, 4)}, cv=3, n_jobs=1)
+            model = GridSearchCV(
+                kernel_ridge.KernelRidge(kernel="rbf", gamma=0.1),
+                param_grid={
+                    "alpha": [1e0, 0.1, 1e-2, 1e-3],
+                    "gamma": np.logspace(-2, 2, 4),
+                },
+                cv=3,
+                n_jobs=1,
+            )
             model.fit(hz, z)
             return model
         else:
@@ -67,7 +85,10 @@ def nonlinear_disentanglement(z, hz, mode: __Mode = "r2", train_test_split=False
             inner_result = _disentanglement(z, hz, mode=mode, reorder=False)
             return inner_result, (z, hz)
 
-def linear_disentanglement(z, hz, mode: __Mode = "r2", train_test_split=False, train_mode=False, model=None):
+
+def linear_disentanglement(
+    z, hz, mode: __Mode = "r2", train_test_split=False, train_mode=False, model=None
+):
     """Calculate disentanglement up to linear transformations.
 
     Args:
@@ -115,6 +136,7 @@ def linear_disentanglement(z, hz, mode: __Mode = "r2", train_test_split=False, t
             hz = model.predict(hz)
             inner_result = _disentanglement(z, hz, mode=mode, reorder=False)
             return inner_result, (z, hz)
+
 
 def compute_r2(z, hz):
     # Normalization
