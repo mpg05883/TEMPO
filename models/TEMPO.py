@@ -8,20 +8,11 @@ import torch.nn.functional as F
 from einops import rearrange
 from huggingface_hub import hf_hub_download
 from omegaconf import OmegaConf
-from peft import (
-    LoraConfig,
-    PeftConfig,
-    PeftModel,
-    TaskType,
-    get_peft_config,
-    get_peft_model,
-)
-from torch import optim
-from transformers import BertModel, BertTokenizer, GPT2LMHeadModel, GPT2Tokenizer
+from peft import LoraConfig, get_peft_model
+from transformers import GPT2Tokenizer
 from transformers.models.gpt2.configuration_gpt2 import GPT2Config
 from transformers.models.gpt2.modeling_gpt2 import GPT2Model
 
-from embed import DataEmbedding, DataEmbedding_wo_time
 from utils.rev_in import RevIn
 
 criterion = nn.MSELoss()
@@ -397,11 +388,11 @@ class TEMPO(nn.Module):
         summary = summary_mapped.view(-1, 768)
         summary_embed_norm = self.l2_normalize(summary, dim=1)
         similarity = torch.matmul(summary_embed_norm, prompt_norm.t())
-        if not prompt_mask == None:
+        if prompt_mask is not None:
             idx = prompt_mask
         else:
             topk_sim, idx = torch.topk(similarity, k=self.top_k, dim=1)
-        if prompt_mask == None:
+        if prompt_mask is None:
             count_of_keys = torch.bincount(torch.flatten(idx), minlength=15)
             for i in range(len(count_of_keys)):
                 self.prompt_record[f"id_{i}"] += count_of_keys[i].item()
@@ -520,7 +511,7 @@ class TEMPO(nn.Module):
 
         x = self.rev_in_trend(x, "norm")
 
-        original_x = x
+        # original_x = x
 
         # Moving average for trend
         trend_local = self.moving_avg(x)

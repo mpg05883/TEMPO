@@ -1,9 +1,8 @@
-import math
+# import math
 
-import numpy as np
+# import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from layers.AutoCorrelation import AutoCorrelation, AutoCorrelationLayer
 from layers.Autoformer_EncDec import (
@@ -18,6 +17,8 @@ from layers.Embed import (  # ,DataEmbedding_wo_pos_temp,DataEmbedding_wo_temp
     DataEmbedding,
     DataEmbedding_wo_pos,
 )
+
+# import torch.nn.functional as F
 
 
 class Autoformer(nn.Module):

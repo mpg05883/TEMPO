@@ -1,22 +1,24 @@
-import numpy as np
+# import numpy as np
 import torch
 import torch.nn as nn
 from einops import rearrange
-from peft import (
-    LoraConfig,
-    PeftConfig,
-    PeftModel,
-    TaskType,
-    get_peft_config,
-    get_peft_model,
-)
-from torch import optim
-from transformers import BertModel, BertTokenizer
+
+# from torch import optim
+# from transformers import BertModel, BertTokenizer
 from transformers.models.gpt2.configuration_gpt2 import GPT2Config
 from transformers.models.gpt2.modeling_gpt2 import GPT2Model
 
-from embed import DataEmbedding, DataEmbedding_wo_time
+# from embed import DataEmbedding, DataEmbedding_wo_time
 from utils.rev_in import RevIn
+
+# from peft import (
+#     LoraConfig,
+#     PeftConfig,
+#     PeftModel,
+#     TaskType,
+#     get_peft_config,
+#     get_peft_model,
+# )
 
 
 class GPT4TS(nn.Module):
@@ -54,15 +56,15 @@ class GPT4TS(nn.Module):
                 else:
                     param.requires_grad = False
 
-        config = LoraConfig(
-            # task_type=TaskType.CAUSAL_LM, # causal language model
-            r=16,
-            lora_alpha=16,
-            # target_modules=["query", "value"],
-            lora_dropout=0.1,
-            bias="lora_only",  # bias, set to only lora layers to train
-            # modules_to_save=["classifier"],
-        )
+        # config = LoraConfig(
+        #     # task_type=TaskType.CAUSAL_LM, # causal language model
+        #     r=16,
+        #     lora_alpha=16,
+        #     # target_modules=["query", "value"],
+        #     lora_dropout=0.1,
+        #     bias="lora_only",  # bias, set to only lora layers to train
+        #     # modules_to_save=["classifier"],
+        # )
 
         # for i, (name, param) in enumerate(self.gpt2_season.named_parameters()):
         #     if 'ln' in name or 'wpe' in name:
@@ -115,4 +117,5 @@ class GPT4TS(nn.Module):
         outputs = outputs * stdev
         outputs = outputs + means
 
+        return outputs
         return outputs

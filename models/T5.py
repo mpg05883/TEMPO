@@ -1,13 +1,11 @@
-import numpy as np
+# import numpy as np
 import torch
 import torch.nn as nn
 from einops import rearrange
-from torch import optim
-from transformers import (
-    T5Config,  # import T5 package
-    T5ForConditionalGeneration,
-    T5Tokenizer,
-)
+
+# from torch import optim
+from transformers import T5Config  # import T5 package
+from transformers import T5ForConditionalGeneration
 
 
 class T54TS(nn.Module):
@@ -85,6 +83,10 @@ class T54TS(nn.Module):
         outputs = self.out_layer(outputs.reshape(B * M, -1))  # 4, 96
         outputs = rearrange(outputs, "(b m) l -> b l m", b=B)  # 4, 96, 1
 
+        outputs = outputs * stdev
+        outputs = outputs + means
+
+        return outputs
         outputs = outputs * stdev
         outputs = outputs + means
 
