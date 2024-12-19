@@ -23,12 +23,8 @@ from models.GPT4TS import GPT4TS
 from models.PatchTST import PatchTST
 from models.T5 import T54TS
 from models.TEMPO import TEMPO
-from utils.tools import (
-    EarlyStopping,
-    adjust_learning_rate,  # test,; visual,
-    test_probs,
-    vali,
-)
+from utils.tools import adjust_learning_rate  # test,; visual,
+from utils.tools import EarlyStopping, test_probs, vali
 
 
 def get_init_config(config_path=None):

@@ -3,6 +3,7 @@ import warnings
 
 import numpy as np
 import torch
+import torch.distributions as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
@@ -14,6 +15,7 @@ from transformers.models.gpt2.configuration_gpt2 import GPT2Config
 from transformers.models.gpt2.modeling_gpt2 import GPT2Model
 
 from utils.rev_in import RevIn
+from utils.tools import sample_negative_binomial
 
 criterion = nn.MSELoss()
 
@@ -655,32 +657,48 @@ class TEMPO(nn.Module):
 
     def predict(self, x, pred_length=96):
         """
-        Predict using the TEMPO model.
+        Computes predictions for pred_length future time steps using the TEMPO
+        model and given input data.
 
         Args:
         - x: Input time series data (shape: [B, L, M])
+            - B: batch size
+            - L: length
+            - M: number of channels
 
         Returns:
-        - Predicted output
+        - Predicted values for pred_length future time steps
         """
-        self.eval()  # Set the model to evaluation mode
+        # Set model to evaluation mode
+        self.eval()
 
-        x = (
-            torch.FloatTensor(x).unsqueeze(0).unsqueeze(2).to(self.device)
-        )  # Shape: [1, 336, 1]
+        # Set x's shape to [1, 336, 1]
+        x = torch.FloatTensor(x).unsqueeze(0).unsqueeze(2).to(self.device)
+
+        # Normalize x
         x = self.rev_in_trend(x, "norm")
 
+        # Batch size, length, and number of channels
         B, L, M = x.shape
-        target_length = self.seq_len  # Maximum supported length
 
+        # Maximum supported number of time steps in x
+        target_length = self.seq_len
+
+        # If x is longer than target_length, then truncate it to the last
+        # target_length time steps
         if L > target_length:
             warnings.warn(
                 f"Input length {L} is larger than the maximum supported length of {target_length}. "
                 f"This may influence performance. Cutting the input to the last {target_length} time steps."
             )
             x = x[:, -target_length:, :]
+        # If x is less than target_length, then make it have target_length time
+        # steps
         elif L < target_length:
+            # remaining number of time steps for x to have target_length time
+            # steps
             pad_length = target_length - L
+
             if pad_length <= L:
                 # Pad by repeating the time series
                 x_padded = torch.cat([x] * (target_length // L + 1), dim=1)[
@@ -700,21 +718,17 @@ class TEMPO(nn.Module):
         # Ensure x is on the same device as the model
         x = x.to(self.device)
 
-        # with torch.no_grad():
-        #     outputs, _ = self.forward(x, test=True)
-        # # Extract the predicted values
-        # predicted_values = outputs.squeeze().numpy()[-pred_length:]
-        # return predicted_values
-
+        # Compute predictions for future time steps
         with torch.no_grad():
             current_input = x.clone()
-            all_predictions = []
+            all_predictions = []  # List of predictions
 
             while len(all_predictions) < pred_length:
                 # Forward pass
                 outputs, _ = self.forward(current_input, test=True)
                 outputs = self.rev_in_trend(outputs, "denorm")
                 step_size = outputs.shape[1]
+
                 # Extract the predicted values
                 predicted_values = outputs.cpu().squeeze().numpy()[-step_size:]
 
@@ -731,66 +745,113 @@ class TEMPO(nn.Module):
                 current_input = (
                     torch.FloatTensor(new_sequence).unsqueeze(0).unsqueeze(2)
                 )
+
         # Trim to the desired length
         return np.array(all_predictions[:pred_length])
 
     def predict_prob(self, x, pred_length=96):
         """
-        Predict using the TEMPO model.
+        Compute probabilistic predictions for pred_length future time steps
+        using the TEMPO model.
 
         Args:
         - x: Input time series data (shape: [B, L, M])
+            - B: batch size
+            - L: length
+            - M: number of channels
 
         Returns:
-        - Predicted output
+        - Probability distribution for each of the pred_length future time steps
         """
-        pass
-        # self.eval()  # Set the model to evaluation mode
+        # Set model to evaluation mode
+        self.eval()
 
-        # x = torch.FloatTensor(x).unsqueeze(0).unsqueeze(2).to(self.device)  # Shape: [1, 336, 1]
-        # x = self.rev_in_trend(x, 'norm')
+        # Set x's shape to [1, 336, 1]
+        x = torch.FloatTensor(x).unsqueeze(0).unsqueeze(2).to(self.device)
 
-        # B, L, M = x.shape
-        # target_length = self.seq_len  # Maximum supported length
+        # Normalize x
+        x = self.rev_in_trend(x, "norm")
 
-        # if L > target_length:
-        #     warnings.warn(f"Input length {L} is larger than the maximum supported length of {target_length}. "
-        #                   f"This may influence performance. Cutting the input to the last {target_length} time steps.")
-        #     x = x[:, -target_length:, :]
-        # elif L < target_length:
-        #     pad_length = target_length - L
-        #     if pad_length <= L:
-        #         # Pad by repeating the time series
-        #         x_padded = torch.cat([x] * (target_length // L + 1), dim=1)[:, :target_length, :]
-        #     else:
-        #         # Pad with zeros at the beginning
-        #         padding = torch.zeros(B, pad_length, M, device=x.device)
-        #         x_padded = torch.cat([padding, x], dim=1)
+        # Batch size, length, and number of channels
+        B, L, M = x.shape
 
-        #     x = x_padded
-        #     warnings.warn(f"Input length {L} is smaller than the required length of {target_length}. "
-        #                   f"The time series has been {'repeated' if pad_length <= L else 'zero-padded'} to reach the required length.")
+        # Maximum supported number of time steps in x
+        target_length = self.seq_len
 
-        # # Ensure x is on the same device as the model
-        # x = x.to(self.device)
+        # If x is longer than target_length, then truncate it to the last
+        # target_length time steps
+        if L > target_length:
+            warnings.warn(
+                f"Input length {L} is larger than the maximum supported length of {target_length}. "
+                f"This may influence performance. Cutting the input to the last {target_length} time steps."
+            )
+            x = x[:, -target_length:, :]
+        # If x is less than target_length, then make it have target_length time
+        # steps
+        elif L < target_length:
+            # remaining number of time steps for x to have target_length time
+            # steps
+            pad_length = target_length - L
 
-        # with torch.no_grad():
-        #     current_input = x.clone()
-        #     all_predictions = []
+            if pad_length <= L:
+                # Pad by repeating the time series
+                x_padded = torch.cat([x] * (target_length // L + 1), dim=1)[
+                    :, :target_length, :
+                ]
+            else:
+                # Pad with zeros at the beginning
+                padding = torch.zeros(B, pad_length, M, device=x.device)
+                x_padded = torch.cat([padding, x], dim=1)
 
-        #     while len(all_predictions) < pred_length:
-        #         # Forward pass
-        #         outputs, _ = self.forward(current_input, test=True)
-        #         outputs = self.rev_in_trend(outputs, 'denorm')
-        #         step_size = outputs.shape[1]
-        #         # Extract the predicted values
-        #         predicted_values = outputs.cpu().squeeze().numpy()[-step_size:]
+            x = x_padded
+            warnings.warn(
+                f"Input length {L} is smaller than the required length of {target_length}. "
+                f"The time series has been {'repeated' if pad_length <= L else 'zero-padded'} to reach the required length."
+            )
 
-        #         # Append to all predictions
-        #         all_predictions.extend(predicted_values)
+        # Ensure x is on the same device as the model
+        x = x.to(self.device)
 
-        #         # Update the input for the next iteration
-        #         new_sequence = np.concatenate([current_input.cpu().squeeze().numpy()[step_size:], predicted_values])
-        #         current_input = torch.FloatTensor(new_sequence).unsqueeze(0).unsqueeze(2)
-        # # Trim to the desired length
-        # return np.array(all_predictions[:pred_length])
+        # Compute probability distributions for future time steps
+        with torch.no_grad():
+            current_input = x.clone()
+            all_forecasts = []
+
+            while len(all_forecasts) < pred_length:
+                outputs, _ = self.forward(current_input, test=True)
+
+                if self.loss_func == "prob":
+                    mu, sigma, nu = outputs
+                    # Create Student's t-distribution
+                    student_t = dist.StudentT(df=nu, loc=mu, scale=sigma)
+
+                    # Generate num_samples samples for each prediction
+                    probabilistic_forecasts = student_t.rsample(self.num_samples)
+
+                elif self.loss_func == "negative_binomial":
+                    mu, alpha = outputs
+                    probabilistic_forecasts = sample_negative_binomial(
+                        mu, alpha, self.num_samples
+                    )
+
+                all_forecasts.append(probabilistic_forecasts.cpu().numpy())
+                step_size = probabilistic_forecasts.shape[2]
+
+                # Use the probability distribution at each future time step
+                # to get the most likely value at each future time step
+                predicted_values = (
+                    probabilistic_forecasts.mean(dim=0).cpu().numpy()[-step_size:]
+                )
+
+                # Update current input
+                new_sequence = np.concatenate(
+                    [
+                        current_input.cpu().squeeze().numpy()[step_size:],
+                        predicted_values,
+                    ]
+                )
+                current_input = (
+                    torch.FloatTensor(new_sequence).unsqueeze(0).unsqueeze(2)
+                )
+
+        return np.concatenate(all_forecasts, axis=1)[:pred_length]
