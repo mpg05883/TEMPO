@@ -60,7 +60,6 @@ def calc_quantile_CRPS_sum(target, forecast, eval_points, mean_scaler, scaler):
     target = target * scaler + mean_scaler
     target = target.sum(-1)
     forecast = forecast * scaler + mean_scaler
-    # import pdb; pdb.set_trace()
     quantiles = np.arange(0.05, 1.0, 0.05)
     denom = calc_denominator(target, eval_points)
     CRPS = 0

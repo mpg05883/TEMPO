@@ -467,16 +467,10 @@ def metric_mae_mse(preds, trues):
 def test(model, test_data, test_loader, args, device, itr, prob=False):
     # If prob set to True, then evaluate probabilistic forecasts
     if prob:
-        # call predict_prob()
-
-        # call test_prob()
+        # call test_prob() to get crps and crpssum
 
         # return crps and crpssum
         pass
-
-    # preds = []
-    # trues = []
-    # mases = []
 
     # Initialize accumulators for errors
     total_mae = 0
@@ -607,8 +601,13 @@ def sample_negative_binomial(mu, alpha, num_samples=1):
 
 
 def test_probs(model, test_data, test_loader, args, device, itr):
-    preds = []  # store predicted future values
-    trues = []  # store true future values
+    # Initialize accumulators for errors
+    # total_mae = 0
+    # total_mse = 0
+    # n_samples = 0
+
+    preds = []
+    trues = []
     masks = []
     # means = []
     # stds = []
@@ -616,69 +615,25 @@ def test_probs(model, test_data, test_loader, args, device, itr):
     model.eval()
     with torch.no_grad():
         for i, data in tqdm(enumerate(test_loader), total=len(test_loader)):
-
             batch_x, batch_y, batch_x_mark, batch_y_mark = (
                 data[0],
                 data[1],
                 data[2],
                 data[3],
-            )  # , data[4], data[5], data[6]
+            )
             batch_x = batch_x.float().to(device)
             batch_x_mark = batch_x_mark.float().to(device)
             batch_y_mark = batch_y_mark.float().to(device)
             batch_y = batch_y.float()
 
-            # perform channelwise probabilistic forecasting
             for channel in range(batch_x.shape[-1]):
-                if (
-                    args.model == "TEMPO"
-                    or args.model == "TEMPO_t5"
-                    or "multi" in args.model
-                ):
-                    seq_trend = seq_trend.float().to(device)
-                    seq_seasonal = seq_seasonal.float().to(device)
-                    seq_resid = seq_resid.float().to(device)
-                    outputs, _ = model(
-                        batch_x[:, -args.seq_len :, channel : channel + 1],
-                        itr,
-                        seq_trend[:, -args.seq_len :, :],
-                        seq_seasonal[:, -args.seq_len :, :],
-                        seq_resid[:, -args.seq_len :, :],
-                    )
-                elif (
-                    "former" in args.model
-                    or args.model == "FEDformer"
-                    or args.model == "TimesNet"
-                    or args.model == "LightTS"
-                ):
-                    dec_inp = torch.zeros_like(batch_y[:, -args.pred_len :, :]).float()
-                    dec_inp = (
-                        torch.cat([batch_y[:, : args.label_len, :], dec_inp], dim=1)
-                        .float()
-                        .to(device)
-                    )
-                    outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-                else:
-                    outputs = model(
-                        batch_x[:, -args.seq_len :, channel : channel + 1], itr
-                    )
+                # Compute probabilistic forecasts
+                probabilistic_forecasts = model.predict_prob(
+                    batch_x[:, -args.seq_len :, channel : channel + 1].cpu().numpy(),
+                    pred_length=args.num_samples,
+                )
 
-                if args.loss_func == "prob":
-                    mu, sigma, nu = outputs[0], outputs[1], outputs[2]
-                    # Create the Student's t-distribution with the predicted parameters
-                    student_t = dist.StudentT(df=nu, loc=mu, scale=sigma)
-
-                    # Generate 30 samples for each prediction
-                    num_samples = args.num_samples
-                    probabilistic_forecasts = student_t.rsample((num_samples,))
-                elif args.loss_func == "negative_binomial":
-                    mu, alpha = outputs[0], outputs[1]
-                    probabilistic_forecasts = sample_negative_binomial(
-                        mu, alpha, args.num_samples
-                    )
-
-                # The shape of probabilistic_forecasts will be (num_samples, batch_size, pred_length)
-                preds.append(probabilistic_forecasts.cpu().numpy())
+                preds.append(probabilistic_forecasts)
                 trues.append(batch_y[:, :, channel : channel + 1].cpu().numpy())
                 masks.append(batch_x_mark[:, :, channel : channel + 1].cpu().numpy())
 
@@ -695,63 +650,27 @@ def test_probs(model, test_data, test_loader, args, device, itr):
 
     # low_q = np.quantile(preds, 0.05, axis=1)
     # high_q = np.quantile(preds, 0.95, axis=1)
-    mid_q = np.quantile(preds, 0.5, axis=1)
+    # mid_q = np.quantile(preds, 0.5, axis=1)
 
     unormalized_synthetic_data = preds
 
-    print(
-        "MAE:",
-        mae_withmask(
-            torch.Tensor(unormzalized_gt_data),
-            torch.Tensor(mid_q),
-            torch.Tensor(target_mask),
-        ),
+    crps_sum = calc_quantile_CRPS_sum(
+        torch.Tensor(unormzalized_gt_data),
+        torch.Tensor(unormalized_synthetic_data),
+        torch.Tensor(target_mask),
+        mean_scaler=0,
+        scaler=1,
     )
 
-    print(
-        "MSE:",
-        mse_withmask(
-            torch.Tensor(unormzalized_gt_data),
-            torch.Tensor(mid_q),
-            torch.Tensor(target_mask),
-        ),
+    crps = calc_quantile_CRPS(
+        torch.Tensor(unormzalized_gt_data),
+        torch.Tensor(unormalized_synthetic_data),
+        torch.Tensor(target_mask),
+        mean_scaler=0,
+        scaler=1,
     )
 
-    # unormzalized_gt_data = np.swapaxes(unormzalized_gt_data, -1, -2)
-    # unormalized_synthetic_data = np.swapaxes(unormalized_synthetic_data, -1, -2)
-    # target_mask = np.swapaxes(target_mask, -1, -2)
+    print(f"CRPS_Sum: {crps_sum}")
+    print(f"CRPS : {crps}")
 
-    # low_q = np.quantile(unormalized_synthetic_data,0.05,axis=1)
-    # high_q = np.quantile(unormalized_synthetic_data,0.95,axis=1)
-    # mid_q = np.quantile(unormalized_synthetic_data,0.5,axis=1)
-
-    # unormzalized_gt_data = np.swapaxes(unormzalized_gt_data, -1, -2)
-    # unormalized_synthetic_data = np.swapaxes(unormalized_synthetic_data, -1, -2)
-    # target_mask = np.swapaxes(target_mask, -1, -2)
-
-    print(
-        "CRPS_Sum:",
-        calc_quantile_CRPS_sum(
-            torch.Tensor(unormzalized_gt_data),
-            torch.Tensor(unormalized_synthetic_data),
-            torch.Tensor(target_mask),
-            mean_scaler=0,
-            scaler=1,
-        ),
-    )
-
-    print(
-        "CRPS:",
-        calc_quantile_CRPS(
-            torch.Tensor(unormzalized_gt_data),
-            torch.Tensor(unormalized_synthetic_data),
-            torch.Tensor(target_mask),
-            mean_scaler=0,
-            scaler=1,
-        ),
-    )
-
-    return (
-        preds,
-        trues,
-    )  # mse, mae    print('CRPS_Sum:', calc_quantile_CRPS_sum(torch.Tensor(unormzalized_gt_data),torch.Tensor(unormalized_synthetic_data),torch.Tensor(target_mask),mean_scaler=0,scaler=1))
+    return crps_sum, crps

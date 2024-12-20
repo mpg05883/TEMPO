@@ -655,6 +655,52 @@ class TEMPO(nn.Module):
             return outputs, None
         return outputs, loss_local
 
+    def set_to_target_length(self, x):
+        """
+        Pads/truncates x so it has self.seq_len time steps
+
+        Args:
+        - x: Input time series data (shape: [B, L, M])
+
+        Returns:
+        - Padded/truncated version of x
+        """
+        # Maximum supported number of time steps in x
+        target_length = self.seq_len
+
+        # Batch size, length, and number of channels
+        B, L, M = x.shape
+
+        # If x is longer than target_length, then truncate it to the last
+        # target_length time steps
+        if L > target_length:
+            warnings.warn(
+                f"Input length {L} is larger than the maximum supported length of {target_length}. "
+                f"This may influence performance. Cutting the input to the last {target_length} time steps."
+            )
+
+            return x[:, -target_length:, :]
+
+        # remaining number of time steps for x to have target_length time steps
+        pad_length = target_length - L
+
+        warnings.warn(
+            f"Input length {L} is smaller than the required length of {target_length}. "
+            f"The time series has been {'repeated' if pad_length <= L else 'zero-padded'} to reach the required length."
+        )
+
+        if pad_length <= L:
+            # Pad by repeating the time series
+            x_padded = torch.cat([x] * (target_length // L + 1), dim=1)[
+                :, :target_length, :
+            ]
+        else:
+            # Pad with zeros at the beginning
+            padding = torch.zeros(B, pad_length, M, device=x.device)
+            x_padded = torch.cat([padding, x], dim=1)
+
+        return x_padded
+
     def predict(self, x, pred_length=96):
         """
         Computes predictions for pred_length future time steps using the TEMPO
@@ -678,42 +724,8 @@ class TEMPO(nn.Module):
         # Normalize x
         x = self.rev_in_trend(x, "norm")
 
-        # Batch size, length, and number of channels
-        B, L, M = x.shape
-
-        # Maximum supported number of time steps in x
-        target_length = self.seq_len
-
-        # If x is longer than target_length, then truncate it to the last
-        # target_length time steps
-        if L > target_length:
-            warnings.warn(
-                f"Input length {L} is larger than the maximum supported length of {target_length}. "
-                f"This may influence performance. Cutting the input to the last {target_length} time steps."
-            )
-            x = x[:, -target_length:, :]
-        # If x is less than target_length, then make it have target_length time
-        # steps
-        elif L < target_length:
-            # remaining number of time steps for x to have target_length time
-            # steps
-            pad_length = target_length - L
-
-            if pad_length <= L:
-                # Pad by repeating the time series
-                x_padded = torch.cat([x] * (target_length // L + 1), dim=1)[
-                    :, :target_length, :
-                ]
-            else:
-                # Pad with zeros at the beginning
-                padding = torch.zeros(B, pad_length, M, device=x.device)
-                x_padded = torch.cat([padding, x], dim=1)
-
-            x = x_padded
-            warnings.warn(
-                f"Input length {L} is smaller than the required length of {target_length}. "
-                f"The time series has been {'repeated' if pad_length <= L else 'zero-padded'} to reach the required length."
-            )
+        # Pad/truncate x so it has self.seq_len time steps
+        x = self.set_to_target_length(x)
 
         # Ensure x is on the same device as the model
         x = x.to(self.device)
@@ -772,42 +784,8 @@ class TEMPO(nn.Module):
         # Normalize x
         x = self.rev_in_trend(x, "norm")
 
-        # Batch size, length, and number of channels
-        B, L, M = x.shape
-
-        # Maximum supported number of time steps in x
-        target_length = self.seq_len
-
-        # If x is longer than target_length, then truncate it to the last
-        # target_length time steps
-        if L > target_length:
-            warnings.warn(
-                f"Input length {L} is larger than the maximum supported length of {target_length}. "
-                f"This may influence performance. Cutting the input to the last {target_length} time steps."
-            )
-            x = x[:, -target_length:, :]
-        # If x is less than target_length, then make it have target_length time
-        # steps
-        elif L < target_length:
-            # remaining number of time steps for x to have target_length time
-            # steps
-            pad_length = target_length - L
-
-            if pad_length <= L:
-                # Pad by repeating the time series
-                x_padded = torch.cat([x] * (target_length // L + 1), dim=1)[
-                    :, :target_length, :
-                ]
-            else:
-                # Pad with zeros at the beginning
-                padding = torch.zeros(B, pad_length, M, device=x.device)
-                x_padded = torch.cat([padding, x], dim=1)
-
-            x = x_padded
-            warnings.warn(
-                f"Input length {L} is smaller than the required length of {target_length}. "
-                f"The time series has been {'repeated' if pad_length <= L else 'zero-padded'} to reach the required length."
-            )
+        # Pad/truncate x so it has self.seq_len time steps
+        x = self.set_to_target_length(x)
 
         # Ensure x is on the same device as the model
         x = x.to(self.device)
@@ -826,7 +804,7 @@ class TEMPO(nn.Module):
                     student_t = dist.StudentT(df=nu, loc=mu, scale=sigma)
 
                     # Generate num_samples samples for each prediction
-                    probabilistic_forecasts = student_t.rsample(self.num_samples)
+                    probabilistic_forecasts = student_t.rsample((self.num_samples,))
 
                 elif self.loss_func == "negative_binomial":
                     mu, alpha = outputs
