@@ -2,7 +2,9 @@ import numpy as np
 
 
 def RSE(pred, true):
-    return np.sqrt(np.sum((true - pred) ** 2)) / np.sqrt(np.sum((true - true.mean()) ** 2))
+    return np.sqrt(np.sum((true - pred) ** 2)) / np.sqrt(
+        np.sum((true - true.mean()) ** 2)
+    )
 
 
 def CORR(pred, true):
@@ -24,18 +26,21 @@ def RMSE(pred, true):
 
 
 def MAPE(pred, true):
-    return np.mean(np.abs(100 * (pred - true) / (true +1e-8)))
+    return np.mean(np.abs(100 * (pred - true) / (true + 1e-8)))
 
 
 def MSPE(pred, true):
     return np.mean(np.square((pred - true) / (true + 1e-8)))
 
+
 def SMAPE(pred, true):
     return np.mean(200 * np.abs(pred - true) / (np.abs(pred) + np.abs(true) + 1e-8))
     # return np.mean(200 * np.abs(pred - true) / (pred + true + 1e-8))
 
+
 def ND(pred, true):
     return np.mean(np.abs(true - pred)) / np.mean(np.abs(true))
+
 
 def metric(pred, true):
     mae = MAE(pred, true)

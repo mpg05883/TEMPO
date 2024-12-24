@@ -13,7 +13,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from .dense_nn import DenseNN
+
 
 def _searchsorted(sorted_sequence, values):
     """
@@ -286,6 +288,7 @@ def _monotonic_rational_spline(
     outputs[outside_interval_mask] = inputs[outside_interval_mask]
     logabsdet[outside_interval_mask] = 0.0
     return outputs, logabsdet
+
 
 def _construct_nn(
     input_dim, context_dim, hidden_dims=None, count_bins=8, bound=3.0, order="linear"
