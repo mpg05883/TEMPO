@@ -10,7 +10,7 @@
 #SBATCH --time=12:00:00             # Specify the time needed for your experiment
 #SBATCH --qos=gpu-8                 # To enable the use of up to 8 GPUs
 # 
-# export CUDA_VISIBLE_DEVICES=2
+export CUDA_VISIBLE_DEVICES=4
 
 seq_len=336
 model=TEMPO #TEMPO #PatchTST #_multi
@@ -33,21 +33,23 @@ do
 for prompt in 1 
 do
 mkdir -p logs/$model
-mkdir logs/$model/ReVIN_$prompt'_'prompt'_'equal'_'$equal/
-mkdir logs/$model/ReVIN_$prompt'_'prompt'_'equal'_'$equal/Monash_$model'_'$gpt_layer
-echo logs/$model/ReVIN_$prompt'_'prompt'_'equal'_'$equal/Monash_$model'_'$gpt_layer/test'_'$seq_len'_'$pred_len'_lr'$lr.log
+mkdir logs/$model/Prob_ReVIN_$prompt'_'prompt'_'equal'_'$equal/
+mkdir logs/$model/Prob_ReVIN_$prompt'_'prompt'_'equal'_'$equal/Monash_$model'_'$gpt_layer
+echo logs/$model/Prob_ReVIN_$prompt'_'prompt'_'equal'_'$equal/Monash_$model'_'$gpt_layer/test'_'$seq_len'_'$pred_len'_lr'$lr.log
 
 
 
-python train_TEMPO.py \
-    --datasets monash \
+# python train_TEMPO_prob.py \
+# MASTER_PORT=29503 torchrun --nproc_per_node=2 train_TEMPO_prob_parallel.py \
+python train_TEMPO_prob.py \
+    --datasets ETTh2 \
     --eval_data ETTm1 \
     --target_data ETTh2 \
     --config_path ./configs/multiple_datasets.yml \
     --stl_weight 0.001 \
     --equal $equal \
     --checkpoint ./checkpoints/Monash'_'$prompt/ \
-    --model_id Monash_TEMPO'_'$gpt_layer'_'prompt_learn'_'$seq_len'_'$pred_len'_'$percent \
+    --model_id Demo_Monash_TEMPO_Prob'_'$gpt_layer'_'prompt_learn'_'$seq_len'_'$pred_len'_'$percent \
     --electri_multiplier $electri_multiplier \
     --traffic_multiplier $traffic_multiplier \
     --seq_len $seq_len \
@@ -71,7 +73,9 @@ python train_TEMPO.py \
     --model $model \
     --tmax $tmax \
     --cos 1 \
-    --is_gpt 1 #>> logs/$model/ReVIN_$prompt'_'prompt'_'equal'_'$equal/Monash_$model'_'$gpt_layer/test'_'$seq_len'_'$pred_len'_lr'$lr.log
+    --is_gpt 1 \
+    --loss_func prob
+    #>> logs/$model/Prob_ReVIN_$prompt'_'prompt'_'equal'_'$equal/Monash_$model'_'$gpt_layer/test'_'$seq_len'_'$pred_len'_lr'$lr.log
 
 
 done

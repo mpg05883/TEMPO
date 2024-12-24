@@ -319,79 +319,80 @@ for ii in range(args.itr):
     
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(model_optim, T_max=args.tmax, eta_min=1e-8)
 
-    for epoch in range(args.train_epochs):
+    # for epoch in range(args.train_epochs):
 
-        iter_count = 0
-        train_loss = []
-        epoch_time = time.time()
-        for i, data  in tqdm(enumerate(train_loader),total = len(train_loader)):
+    #     iter_count = 0
+    #     train_loss = []
+    #     epoch_time = time.time()
+    #     for i, data  in tqdm(enumerate(train_loader),total = len(train_loader)):
 
-            batch_x, batch_y, batch_x_mark, batch_y_mark = data[0], data[1], data[2], data[3]
-            iter_count += 1
-            model_optim.zero_grad()
-            batch_x = batch_x.float().to(device)
+    #         batch_x, batch_y, batch_x_mark, batch_y_mark = data[0], data[1], data[2], data[3]
+    #         iter_count += 1
+    #         model_optim.zero_grad()
+    #         batch_x = batch_x.float().to(device)
 
-            batch_y = batch_y.float().to(device)
-            batch_x_mark = batch_x_mark.float().to(device)
-            batch_y_mark = batch_y_mark.float().to(device)
+    #         batch_y = batch_y.float().to(device)
+    #         batch_x_mark = batch_x_mark.float().to(device)
+    #         batch_y_mark = batch_y_mark.float().to(device)
 
             
-            # print(seq_seasonal.shape)
-            if args.model == 'TEMPO' or 'multi' in args.model:
-                seq_trend = seq_trend.float().to(device)
-                seq_seasonal = seq_seasonal.float().to(device)
-                seq_resid = seq_resid.float().to(device)
+    #         # print(seq_seasonal.shape)
+    #         if args.model == 'TEMPO' or 'multi' in args.model:
+    #             seq_trend, seq_seasonal, seq_resid = data[4], data[5], data[6]
+    #             seq_trend = seq_trend.float().to(device)
+    #             seq_seasonal = seq_seasonal.float().to(device)
+    #             seq_resid = seq_resid.float().to(device)
 
-                outputs, loss_local = model(batch_x, ii, seq_trend, seq_seasonal, seq_resid) #+ model(seq_seasonal, ii) + model(seq_resid, ii)
-            elif 'former' in args.model:
-                dec_inp = torch.zeros_like(batch_y[:, -args.pred_len:, :]).float()
-                dec_inp = torch.cat([batch_y[:, :args.label_len, :], dec_inp], dim=1).float().to(device)
-                outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-            else:
-                outputs = model(batch_x, ii)
+    #             outputs, loss_local = model(batch_x, ii, seq_trend, seq_seasonal, seq_resid) #+ model(seq_seasonal, ii) + model(seq_resid, ii)
+    #         elif 'former' in args.model:
+    #             dec_inp = torch.zeros_like(batch_y[:, -args.pred_len:, :]).float()
+    #             dec_inp = torch.cat([batch_y[:, :args.label_len, :], dec_inp], dim=1).float().to(device)
+    #             outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+    #         else:
+    #             outputs = model(batch_x, ii)
             
-            if args.loss_func == 'prob' or args.loss_func == 'negative_binomial':
-                # outputs = outputs[:, -args.pred_len:, :]
-                batch_y = batch_y[:, -args.pred_len:, :].to(device).squeeze()
-                loss = criterion(batch_y, outputs)
-            else:
-                outputs = outputs[:, -args.pred_len:, :]
-                batch_y = batch_y[:, -args.pred_len:, :].to(device)
-                loss = criterion(outputs, batch_y) 
+    #         if args.loss_func == 'prob' or args.loss_func == 'negative_binomial':
+    #             # outputs = outputs[:, -args.pred_len:, :]
+    #             batch_y = batch_y[:, -args.pred_len:, :].to(device).squeeze()
+    #             loss = criterion(batch_y, outputs)
+    #         else:
+    #             outputs = outputs[:, -args.pred_len:, :]
+    #             batch_y = batch_y[:, -args.pred_len:, :].to(device)
+    #             loss = criterion(outputs, batch_y) 
 
-            if args.model == 'GPT4TS_multi' or args.model == 'TEMPO_t5':
-                if not args.no_stl_loss:
-                    loss += args.stl_weight*loss_local
-            train_loss.append(loss.item())
+    #         if args.model == 'GPT4TS_multi' or args.model == 'TEMPO_t5':
+    #             if not args.no_stl_loss:
+    #                 loss += args.stl_weight*loss_local
+    #         train_loss.append(loss.item())
 
-            if (i + 1) % 1000 == 0:
-                print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(i + 1, epoch + 1, loss.item()))
-                speed = (time.time() - time_now) / iter_count
-                left_time = speed * ((args.train_epochs - epoch) * train_steps - i)
-                print('\tspeed: {:.4f}s/iter; left time: {:.4f}s'.format(speed, left_time))
-                iter_count = 0
-                time_now = time.time()
-            loss.backward()
-            model_optim.step()
+    #         if (i + 1) % 1000 == 0:
+    #             print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(i + 1, epoch + 1, loss.item()))
+    #             speed = (time.time() - time_now) / iter_count
+    #             left_time = speed * ((args.train_epochs - epoch) * train_steps - i)
+    #             print('\tspeed: {:.4f}s/iter; left time: {:.4f}s'.format(speed, left_time))
+    #             iter_count = 0
+    #             time_now = time.time()
+    #         loss.backward()
+    #         model_optim.step()
         
         
-        print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
+    #     print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
 
-        train_loss = np.average(train_loss)
-        vali_loss = vali(model, vali_data, vali_loader, criterion, args, device, ii)
+    #     train_loss = np.average(train_loss)
+    #     vali_loss = vali(model, vali_data, vali_loader, criterion, args, device, ii)
        
-        print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f}".format(
-            epoch + 1, train_steps, train_loss, vali_loss))
+    #     print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f}".format(
+    #         epoch + 1, train_steps, train_loss, vali_loss))
 
-        if args.cos:
-            scheduler.step()
-            print("lr = {:.10f}".format(model_optim.param_groups[0]['lr']))
-        else:
-            adjust_learning_rate(model_optim, epoch + 1, args)
-        early_stopping(vali_loss, model, path)
-        if early_stopping.early_stop:
-            print("Early stopping")
-            break
+    #     if args.cos:
+    #         scheduler.step()
+    #         print("lr = {:.10f}".format(model_optim.param_groups[0]['lr']))
+    #     else:
+    #         adjust_learning_rate(model_optim, epoch + 1, args)
+    #     early_stopping(vali_loss, model, path)
+    #     if early_stopping.early_stop:
+    #         print("Early stopping")
+    #         break
     
 
     best_model_path = path + '/' + 'checkpoint.pth'

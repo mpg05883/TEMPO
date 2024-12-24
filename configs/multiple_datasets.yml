@@ -1,6 +1,6 @@
 datasets:
   ETTh1:
-    root_path: ./dataset/ETT-small/
+    root_path: ./datasets/all_datasets/ETT-small/
     data_path: ETTh1.csv
     data_name: etth1
     data: ett_h
@@ -11,7 +11,7 @@ datasets:
     freq: 0
     percent: 100
   ETTh2:
-    root_path: ./dataset/ETT-small/
+    root_path: ./datasets/all_datasets/ETT-small/
     data_path: ETTh2.csv
     data_name: etth2
     data: ett_h
@@ -22,7 +22,7 @@ datasets:
     freq: 0
     percent: 100
   ETTm1:
-    root_path: ./dataset/ETT-small/
+    root_path: ./datasets/all_datasets/ETT-small/
     data_path: ETTm1.csv
     data_name: ettm1
     data: ett_m
@@ -33,7 +33,7 @@ datasets:
     freq: 0
     percent: 100
   ETTm2:
-    root_path: ./dataset/ETT-small/
+    root_path: ./datasets/all_datasets/ETT-small/
     data_path: ETTm2.csv
     data_name: ettm2
     data: ett_m
@@ -44,7 +44,7 @@ datasets:
     freq: 0
     percent: 100
   traffic:
-    root_path: ./dataset/traffic/
+    root_path: ./datasets/all_datasets/traffic/
     data_path: traffic.csv
     data_name: traffic
     data: custom
@@ -55,7 +55,7 @@ datasets:
     freq: 0
     percent: 100
   weather:
-    root_path: ./dataset/weather/
+    root_path: ./datasets/all_datasets/weather/
     data_path: weather.csv
     data_name: weather
     data: custom
@@ -66,7 +66,7 @@ datasets:
     freq: 0
     percent: 100
   electricity:
-    root_path: ./dataset/electricity/
+    root_path: ./datasets/all_datasets/electricity/
     data_path: electricity.csv
     data_name: electricity
     data: custom
@@ -77,7 +77,7 @@ datasets:
     freq: 0
     percent: 100
   ILI:
-    root_path: ./dataset/illness/
+    root_path: ./datasets/all_datasets/illness/
     data_path: national_illness.csv
     data_name: ILI
     data: custom
@@ -88,7 +88,7 @@ datasets:
     freq: 0
     percent: 100 
   exchange:
-    root_path: ./dataset/exchange_rate/
+    root_path: ./datasets/all_datasets/exchange_rate/
     data_path: exchange_rate.csv
     data_name: exchange
     data: custom
@@ -99,7 +99,7 @@ datasets:
     freq: 0
     percent: 100
   monash:
-    root_path: ./datasets/Monash_small/
+    root_path: ./datasets/all_datasets/Monash_small/
     data_path: monash.csv
     data_name: monash
     data: monash

@@ -52,6 +52,7 @@ class Dataset_Monash(Dataset):
 
 
     def __read_data__(self):
+        '''
         self.scaler = StandardScaler()
         files = os.listdir(self.root_path)
         # import pdb; pdb.set_trace()
@@ -79,7 +80,68 @@ class Dataset_Monash(Dataset):
             inner_data = sum(lists_Data, [])
             self.all_datasets_list.extend(list(inner_data))
         # self.all_datasets_list = sum([list(all_datasets[key].values()) for key in all_datasets], [])
+        '''
 
+        def save_large_list(data_list, cache_file, chunk_size=1000):
+            with open(cache_file, 'wb') as f:
+                for i in range(0, len(data_list), chunk_size):
+                    chunk = data_list[i:i + chunk_size]
+                    pickle.dump(chunk, f)
+
+        def load_large_list(cache_file):
+            result = []
+            with open(cache_file, 'rb') as f:
+                while True:
+                    try:
+                        chunk = pickle.load(f)
+                        result.extend(chunk)
+                    except EOFError:
+                        break
+            return result
+
+        def load_all_datasets(directory):
+
+            cache_file = os.path.join(directory, 'cache/all_datasets_cache.pkl')
+    
+            # # Try to load from cache first
+            # if os.path.exists(cache_file):
+            #     print("Loading from cache file...")
+            #     # with open(cache_file, 'rb') as f:
+            #     #     return pickle.load(f)
+            #     load_large_list(cache_file)
+    
+            all_datasets_list = []
+
+            # 遍历指定目录中的所有文件
+            for filename in os.listdir(directory):
+                if filename.endswith('.pkl'):
+                    if any(keyword in filename for keyword in [
+                        'monash_pedestrian_counts',
+                        'm4_weekly', 'm4_yearly', 'm4_hourly', 'm4_monthly',
+                        'ercot', 
+                    # 'm4_weekly', 'm4_yearly', 'm4_hourly', 'm4_monthly',
+                    ]):
+                        print(filename)
+                        file_path = os.path.join(directory, filename)
+                        
+                        # 读取pickle文件
+                        with open(file_path, 'rb') as file:
+                            data = pickle.load(file)
+                            
+                            # 检查sliding_windows是否在数据中
+                            # if 'sliding_windows' in data:
+                            for key in list(data.keys()):
+                                all_datasets_list.extend(data[key])
+                        # break
+            # # Save to cache
+            # print("Saving to cache file...")
+            # save_large_list(all_datasets_list, cache_file)
+            
+            return all_datasets_list
+
+        # 使用示例
+        directory = 'datasets/chronos'
+        self.all_datasets_list = load_all_datasets(directory)
         print(len(self.all_datasets_list))
         # import pdb; pdb.set_trace()
 

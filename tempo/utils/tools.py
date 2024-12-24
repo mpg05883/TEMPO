@@ -373,7 +373,7 @@ def vali(model, vali_data, vali_loader, criterion, args, device, itr):
 
                 loss = criterion(pred, true)
 
-            total_loss.append(loss)
+            total_loss.append(loss.cpu().numpy())
     total_loss = np.average(total_loss)
     if args.model == 'PatchTST' or args.model == 'DLinear' or args.model == 'TCN' or  args.model == 'NLinear' or  args.model == 'NLinear_multi':
         model.train()
@@ -537,6 +537,7 @@ def test_probs(model, test_data, test_loader, args, device, itr):
 
             for channel in range(batch_x.shape[-1]):
                 if args.model == 'TEMPO' or args.model == 'TEMPO_t5' or 'multi' in args.model:
+                    seq_trend, seq_seasonal, seq_resid = data[4], data[5], data[6]
                     seq_trend = seq_trend.float().to(device)
                     seq_seasonal = seq_seasonal.float().to(device)
                     seq_resid = seq_resid.float().to(device)
@@ -562,7 +563,7 @@ def test_probs(model, test_data, test_loader, args, device, itr):
                 # The shape of probabilistic_forecasts will be (num_samples, batch_size, pred_length)
                 preds.append(probabilistic_forecasts.cpu().numpy())
                 trues.append(batch_y[:,:, channel:channel+1].cpu().numpy())
-                masks.append(batch_x_mark[:,:, channel:channel+1].cpu().numpy())
+                masks.append(batch_x_mark[:,-args.pred_len:, channel:channel+1].cpu().numpy())
 
             torch.cuda.empty_cache()
             
@@ -582,6 +583,7 @@ def test_probs(model, test_data, test_loader, args, device, itr):
 
     unormalized_synthetic_data = preds
 
+    # import pdb; pdb.set_trace()
     print('MAE:', mae_withmask(torch.Tensor(unormzalized_gt_data),torch.Tensor(mid_q),torch.Tensor(target_mask)))
 
     print('MSE:', mse_withmask(torch.Tensor(unormzalized_gt_data),torch.Tensor(mid_q),torch.Tensor(target_mask)))

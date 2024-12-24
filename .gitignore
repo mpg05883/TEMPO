@@ -35,4 +35,6 @@ results_results
 results_results/*
 stl
 dataset
+datasets/*
+*.log*
 */*[@]

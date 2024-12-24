@@ -1,5 +1,5 @@
 from tempo.data_provider.data_factory import data_provider
-from tempo.utils.tools import EarlyStopping, adjust_learning_rate, visual, vali, test, EarlyStopping_dist
+from tempo.utils.tools import EarlyStopping, adjust_learning_rate, visual, vali, test, EarlyStopping_dist, test_probs
 from torch.utils.data import Subset
 from tqdm import tqdm
 from tempo.models.PatchTST import PatchTST
@@ -284,6 +284,36 @@ def main(args, config):
                 def forward(self, pred, true):
                     return torch.mean(200 * torch.abs(pred - true) / (torch.abs(pred) + torch.abs(true) + 1e-8))
             criterion = SMAPE()
+        elif args.loss_func == 'prob':
+            import torch.distributions as dist
+            def criterion(y_true, y_pred):
+                y_true = y_true.squeeze()
+                mu, sigma, nu = y_pred[0], y_pred[1], y_pred[2]
+                # Create the Student's t-distribution
+                nu = torch.abs(nu) + 1e-6
+                sigma = torch.abs(sigma) + 1e-6
+                mu = mu
+                student_t = dist.StudentT(df=nu, loc=mu, scale=sigma)
+                # Calculate the negative log-likelihood
+                nll = -student_t.log_prob(y_true)
+                return nll.mean()
+        elif args.loss_func == 'negative_binomial':
+            import torch.distributions as dist
+            def criterion(target, y_pred):
+                # Compute negative log-likelihood of Negative Binomial distribution
+                mu, alpha = y_pred[0], y_pred[1]
+                if len(target.shape)!=3:
+                    target = target.unsqueeze(2)
+                log_gamma_x_plus_n = torch.lgamma(target + 1.0 / alpha)
+                log_gamma_x = torch.lgamma(target + 1)
+                log_gamma_n = torch.lgamma(1.0 / alpha)
+                
+                log_prob = log_gamma_x_plus_n - log_gamma_x - log_gamma_n \
+                        - (target + 1.0 / alpha) * torch.log1p(alpha * mu) \
+                        + target * torch.log(alpha * mu) - target * torch.log1p(alpha * mu)
+                
+                return -log_prob.mean()
+        
         
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(model_optim, T_max=args.tmax, eta_min=1e-8)
 
@@ -318,9 +348,16 @@ def main(args, config):
                     outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 else:
                     outputs = model(batch_x, ii)
-                outputs = outputs[:, -args.pred_len:, :]
-                batch_y = batch_y[:, -args.pred_len:, :].to(device)
-                loss = criterion(outputs, batch_y) 
+
+                if args.loss_func == 'prob' or args.loss_func == 'negative_binomial':
+                # outputs = outputs[:, -args.pred_len:, :]
+                    batch_y = batch_y[:, -args.pred_len:, :].to(device).squeeze()
+                    loss = criterion(batch_y, outputs)
+                else:
+                    outputs = outputs[:, -args.pred_len:, :]
+                    batch_y = batch_y[:, -args.pred_len:, :].to(device)
+                    loss = criterion(outputs, batch_y) 
+               
                 if args.model == 'GPT4TS_multi' or args.model == 'TEMPO_t5':
                     if not args.no_stl_loss:
                         loss += args.stl_weight*loss_local
@@ -359,7 +396,7 @@ def main(args, config):
         best_model_path = path + '/' + 'checkpoint.pth'
         model.load_state_dict(torch.load(best_model_path), strict=False)
         print("------------------------------------")
-        mse, mae = test(model, test_data, test_loader, args, device, ii)
+        mse, mae = test_probs(model, test_data, test_loader, args, device, ii)
         torch.cuda.empty_cache()
         print('test on the ' + str(args.target_data) + ' dataset: mse:' + str(mse) + ' mae:' + str(mae))
         

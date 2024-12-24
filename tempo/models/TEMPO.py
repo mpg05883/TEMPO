@@ -258,7 +258,8 @@ class TEMPO(nn.Module):
         cfg = None,
         repo_id="Melady/TEMPO",
         filename="TEMPO-80M_v1.pth",
-        cache_dir="./checkpoints/TEMPO_checkpoints"
+        cache_dir="./checkpoints/TEMPO_checkpoints",
+        probs = False
     ):
         # Download the model checkpoint
         checkpoint_path = hf_hub_download(

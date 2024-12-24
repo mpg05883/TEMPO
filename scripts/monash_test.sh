@@ -10,7 +10,7 @@
 #SBATCH --time=12:00:00             # Specify the time needed for your experiment
 #SBATCH --qos=gpu-8                 # To enable the use of up to 8 GPUs
 # 
-# export CUDA_VISIBLE_DEVICES=2
+export CUDA_VISIBLE_DEVICES=4
 
 seq_len=336
 model=TEMPO #TEMPO #PatchTST #_multi
@@ -40,14 +40,14 @@ echo logs/$model/ReVIN_$prompt'_'prompt'_'equal'_'$equal/Monash_$model'_'$gpt_la
 
 
 python train_TEMPO.py \
-    --datasets monash \
+    --datasets ETTh1 \
     --eval_data ETTm1 \
-    --target_data ETTh2 \
+    --target_data weather \
     --config_path ./configs/multiple_datasets.yml \
     --stl_weight 0.001 \
     --equal $equal \
     --checkpoint ./checkpoints/Monash'_'$prompt/ \
-    --model_id Monash_TEMPO'_'$gpt_layer'_'prompt_learn'_'$seq_len'_'$pred_len'_'$percent \
+    --model_id Con1_Monash_TEMPO'_'$gpt_layer'_'prompt_learn'_'$seq_len'_'$pred_len'_'$percent \
     --electri_multiplier $electri_multiplier \
     --traffic_multiplier $traffic_multiplier \
     --seq_len $seq_len \
