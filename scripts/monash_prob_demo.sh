@@ -32,12 +32,31 @@ for equal in 1
 do
 for prompt in 1 
 do
-mkdir -p logs/$model
-mkdir logs/$model/Prob_ReVIN_$prompt'_'prompt'_'equal'_'$equal/
-mkdir logs/$model/Prob_ReVIN_$prompt'_'prompt'_'equal'_'$equal/Monash_$model'_'$gpt_layer
-echo logs/$model/Prob_ReVIN_$prompt'_'prompt'_'equal'_'$equal/Monash_$model'_'$gpt_layer/test'_'$seq_len'_'$pred_len'_lr'$lr.log
+if [ ! -d "logs/$model" ]; then
+    mkdir -p logs/$model
+    echo "Directory logs/$model has been created."
+else
+    echo "Directory logs/$model already exists."
+fi
 
+dir1="logs/$model/Prob_ReVIN_${prompt}_${prompt}_equal_${equal}/"
+if [ ! -d "$dir1" ]; then
+    mkdir -p "$dir1"
+    echo "Directory $dir1 has been created."
+else
+    echo "Directory $dir1 already exists."  
+fi
 
+dir2="${dir1}Monash_${model}_${gpt_layer}"
+if [ ! -d "$dir2" ]; then
+    mkdir -p "$dir2"
+    echo "Directory $dir2 has been created."
+else
+    echo "Directory $dir2 already exists."
+fi
+
+log_path="${dir2}/test_${seq_len}_${pred_len}_lr${lr}.log"
+echo -e "$log_path\n"
 
 # python train_TEMPO_prob.py \
 # MASTER_PORT=29503 torchrun --nproc_per_node=2 train_TEMPO_prob_parallel.py \

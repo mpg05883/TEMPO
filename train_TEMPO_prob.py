@@ -1,17 +1,19 @@
 import argparse
+import logging
 import os
 import random
 import sys
 import time
 import warnings
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 from numpy.random import choice
 from omegaconf import OmegaConf
-from torch import optim
+
+# from torch import optim
 from torch.utils.data import Subset
 from tqdm import tqdm
 
@@ -25,24 +27,38 @@ from tempo.models.TEMPO import TEMPO
 from tempo.utils.tools import (
     EarlyStopping,
     adjust_learning_rate,
-    test,
     test_probs,
     vali,
     visual,
 )
 
+warnings.filterwarnings("ignore")
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s: %(message)s", datefmt="%m/%d/%Y %I:%M:%S%p"
+)
+
+FIX_SEED = 2021
+random.seed(FIX_SEED)
+torch.manual_seed(FIX_SEED)
+np.random.seed(FIX_SEED)
+
+SEASONALITY_MAP = {
+    "minutely": 1440,
+    "10_minutes": 144,
+    "half_hourly": 48,
+    "hourly": 24,
+    "daily": 7,
+    "weekly": 1,
+    "monthly": 12,
+    "quarterly": 4,
+    "yearly": 1,
+}
+
 
 def get_init_config(config_path=None):
     config = OmegaConf.load(config_path)
     return config
-
-
-warnings.filterwarnings("ignore")
-
-fix_seed = 2021
-random.seed(fix_seed)
-torch.manual_seed(fix_seed)
-np.random.seed(fix_seed)
 
 
 def print_dataset_info(data, loader, name="Dataset"):
@@ -262,19 +278,6 @@ args.itr = 1
 
 print(args)
 
-SEASONALITY_MAP = {
-    "minutely": 1440,
-    "10_minutes": 144,
-    "half_hourly": 48,
-    "hourly": 24,
-    "daily": 7,
-    "weekly": 1,
-    "monthly": 12,
-    "quarterly": 4,
-    "yearly": 1,
-}
-
-
 mses = []
 maes = []
 for ii in range(args.itr):
@@ -299,7 +302,7 @@ for ii in range(args.itr):
     # if args.freq == 0:
     #     args.freq = 'h'
 
-    device = torch.device("cuda:0")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # Load the data
     train_data, train_loader, test_data, test_loader, vali_data, vali_loader = (
         prepare_data_loaders(args, config)
@@ -310,21 +313,17 @@ for ii in range(args.itr):
 
     if args.model == "PatchTST":
         model = PatchTST(args, device)
-        model.to(device)
     elif args.model == "DLinear":
         model = DLinear(args, device)
-        model.to(device)
     elif args.model == "TEMPO":
         model = TEMPO(args, device)
-        model.to(device)
     elif args.model == "T5":
         model = T54TS(args, device)
-        model.to(device)
     elif "ETSformer" in args.model:
         model = ETSformer(args, device)
-        model.to(device)
     else:
         model = GPT4TS(args, device)
+    model.to(device)
     # mse, mae = test(model, test_data, test_loader, args, device, ii)
 
     params = model.parameters()
@@ -389,78 +388,98 @@ for ii in range(args.itr):
         model_optim, T_max=args.tmax, eta_min=1e-8
     )
 
-    # for epoch in range(args.train_epochs):
+    for epoch in range(args.train_epochs):
 
-    #     iter_count = 0
-    #     train_loss = []
-    #     epoch_time = time.time()
-    #     for i, data  in tqdm(enumerate(train_loader),total = len(train_loader)):
+        iter_count = 0
+        train_loss = []
+        epoch_time = time.time()
+        for i, data in tqdm(enumerate(train_loader), total=len(train_loader)):
 
-    #         batch_x, batch_y, batch_x_mark, batch_y_mark = data[0], data[1], data[2], data[3]
-    #         iter_count += 1
-    #         model_optim.zero_grad()
-    #         batch_x = batch_x.float().to(device)
+            batch_x, batch_y, batch_x_mark, batch_y_mark = (
+                data[0],
+                data[1],
+                data[2],
+                data[3],
+            )
+            iter_count += 1
+            model_optim.zero_grad()
+            batch_x = batch_x.float().to(device)
 
-    #         batch_y = batch_y.float().to(device)
-    #         batch_x_mark = batch_x_mark.float().to(device)
-    #         batch_y_mark = batch_y_mark.float().to(device)
+            batch_y = batch_y.float().to(device)
+            batch_x_mark = batch_x_mark.float().to(device)
+            batch_y_mark = batch_y_mark.float().to(device)
 
-    #         # print(seq_seasonal.shape)
-    #         if args.model == 'TEMPO' or 'multi' in args.model:
-    #             seq_trend, seq_seasonal, seq_resid = data[4], data[5], data[6]
-    #             seq_trend = seq_trend.float().to(device)
-    #             seq_seasonal = seq_seasonal.float().to(device)
-    #             seq_resid = seq_resid.float().to(device)
+            # print(seq_seasonal.shape)
+            if args.model == "TEMPO" or "multi" in args.model:
+                seq_trend, seq_seasonal, seq_resid = data[4], data[5], data[6]
+                seq_trend = seq_trend.float().to(device)
+                seq_seasonal = seq_seasonal.float().to(device)
+                seq_resid = seq_resid.float().to(device)
 
-    #             outputs, loss_local = model(batch_x, ii, seq_trend, seq_seasonal, seq_resid) #+ model(seq_seasonal, ii) + model(seq_resid, ii)
-    #         elif 'former' in args.model:
-    #             dec_inp = torch.zeros_like(batch_y[:, -args.pred_len:, :]).float()
-    #             dec_inp = torch.cat([batch_y[:, :args.label_len, :], dec_inp], dim=1).float().to(device)
-    #             outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-    #         else:
-    #             outputs = model(batch_x, ii)
+                outputs, loss_local = model(
+                    batch_x, ii, seq_trend, seq_seasonal, seq_resid
+                )  # + model(seq_seasonal, ii) + model(seq_resid, ii)
+            elif "former" in args.model:
+                dec_inp = torch.zeros_like(batch_y[:, -args.pred_len :, :]).float()
+                dec_inp = (
+                    torch.cat([batch_y[:, : args.label_len, :], dec_inp], dim=1)
+                    .float()
+                    .to(device)
+                )
+                outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+            else:
+                outputs = model(batch_x, ii)
 
-    #         if args.loss_func == 'prob' or args.loss_func == 'negative_binomial':
-    #             # outputs = outputs[:, -args.pred_len:, :]
-    #             batch_y = batch_y[:, -args.pred_len:, :].to(device).squeeze()
-    #             loss = criterion(batch_y, outputs)
-    #         else:
-    #             outputs = outputs[:, -args.pred_len:, :]
-    #             batch_y = batch_y[:, -args.pred_len:, :].to(device)
-    #             loss = criterion(outputs, batch_y)
+            if args.loss_func == "prob" or args.loss_func == "negative_binomial":
+                # outputs = outputs[:, -args.pred_len:, :]
+                batch_y = batch_y[:, -args.pred_len :, :].to(device).squeeze()
+                loss = criterion(batch_y, outputs)
+            else:
+                outputs = outputs[:, -args.pred_len :, :]
+                batch_y = batch_y[:, -args.pred_len :, :].to(device)
+                loss = criterion(outputs, batch_y)
 
-    #         if args.model == 'GPT4TS_multi' or args.model == 'TEMPO_t5':
-    #             if not args.no_stl_loss:
-    #                 loss += args.stl_weight*loss_local
-    #         train_loss.append(loss.item())
+            if args.model == "GPT4TS_multi" or args.model == "TEMPO_t5":
+                if not args.no_stl_loss:
+                    loss += args.stl_weight * loss_local
+            train_loss.append(loss.item())
 
-    #         if (i + 1) % 1000 == 0:
-    #             print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(i + 1, epoch + 1, loss.item()))
-    #             speed = (time.time() - time_now) / iter_count
-    #             left_time = speed * ((args.train_epochs - epoch) * train_steps - i)
-    #             print('\tspeed: {:.4f}s/iter; left time: {:.4f}s'.format(speed, left_time))
-    #             iter_count = 0
-    #             time_now = time.time()
-    #         loss.backward()
-    #         model_optim.step()
+            if (i + 1) % 1000 == 0:
+                print(
+                    "\titers: {0}, epoch: {1} | loss: {2:.7f}".format(
+                        i + 1, epoch + 1, loss.item()
+                    )
+                )
+                speed = (time.time() - time_now) / iter_count
+                left_time = speed * ((args.train_epochs - epoch) * train_steps - i)
+                print(
+                    "\tspeed: {:.4f}s/iter; left time: {:.4f}s".format(speed, left_time)
+                )
+                iter_count = 0
+                time_now = time.time()
+            loss.backward()
+            model_optim.step()
 
-    #     print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
+        print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
 
-    #     train_loss = np.average(train_loss)
-    #     vali_loss = vali(model, vali_data, vali_loader, criterion, args, device, ii)
+        train_loss = np.average(train_loss)
+        vali_loss = vali(model, vali_data, vali_loader, criterion, args, device, ii)
 
-    #     print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f}".format(
-    #         epoch + 1, train_steps, train_loss, vali_loss))
+        print(
+            "Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f}".format(
+                epoch + 1, train_steps, train_loss, vali_loss
+            )
+        )
 
-    #     if args.cos:
-    #         scheduler.step()
-    #         print("lr = {:.10f}".format(model_optim.param_groups[0]['lr']))
-    #     else:
-    #         adjust_learning_rate(model_optim, epoch + 1, args)
-    #     early_stopping(vali_loss, model, path)
-    #     if early_stopping.early_stop:
-    #         print("Early stopping")
-    #         break
+        if args.cos:
+            scheduler.step()
+            print("lr = {:.10f}".format(model_optim.param_groups[0]["lr"]))
+        else:
+            adjust_learning_rate(model_optim, epoch + 1, args)
+        early_stopping(vali_loss, model, path)
+        if early_stopping.early_stop:
+            print("Early stopping")
+            break
 
     best_model_path = path + "/" + "checkpoint.pth"
     model.load_state_dict(torch.load(best_model_path), strict=False)
