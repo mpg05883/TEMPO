@@ -9,7 +9,7 @@
 #SBATCH -p gpu                      # Use the gpu partition
 #SBATCH --time=12:00:00             # Specify the time needed for your experiment
 #SBATCH --qos=gpu-8                 # To enable the use of up to 8 GPUs
-# 
+# use the following to remove \r: sed -i 's/\r//g' monash_prob_demo.sh 
 export CUDA_VISIBLE_DEVICES=4
 
 seq_len=336
@@ -56,7 +56,7 @@ else
 fi
 
 log_path="${dir2}/test_${seq_len}_${pred_len}_lr${lr}.log"
-echo -e "$log_path\n"
+echo -e "$log_path"
 
 # python train_TEMPO_prob.py \
 # MASTER_PORT=29503 torchrun --nproc_per_node=2 train_TEMPO_prob_parallel.py \

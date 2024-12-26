@@ -64,6 +64,16 @@ def get_init_config(config_path=None):
     return config
 
 
+def print_config(config):
+    print(f"\n=== Config ===\n{OmegaConf.to_yaml(config)}")
+
+
+def print_args(args):
+    print("=== Command line arguments ===")
+    for key, value in vars(args).items():
+        print(f"{key}: {value}")
+
+
 def print_dataset_info(data, loader, name="Dataset"):
     print(f"\n=== {name} Information ===")
     print(f"Number of samples: {len(data)}")
@@ -241,13 +251,9 @@ def main(args):
     # Load model configurations
     config = get_init_config(args.config_path)
 
-    args.itr = 1
+    # print_config(config)
+    # print_args(args)
 
-    # Print command line arguments
-    print(args)
-
-    # mses = []
-    # maes = []
     for iteration in range(args.itr):
 
         setting = "{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_gl{}_df{}_eb{}_itr{}".format(
@@ -263,10 +269,11 @@ def main(args):
             args.embed,
             iteration,
         )
-        # Create file path to checkpoints directory
+
+        # # Get file path to checkpoints directory
         path = os.path.join(args.checkpoints, setting)
 
-        # If checkpoints directory doesn't exist, then create it
+        # # If path to checkpoints directory doesn't exist, then create it
         if not os.path.exists(path):
             os.makedirs(path)
 
@@ -299,7 +306,6 @@ def main(args):
             model = GPT4TS(args, device)
 
         model.to(device)
-        # mse, mae = test(model, test_data, test_loader, args, device, iteration)
 
         params = model.parameters()
         model_optim = torch.optim.Adam(params, lr=args.learning_rate)
@@ -341,7 +347,6 @@ def main(args):
                     batch_x_mark = batch_x_mark.float().to(device)
                     batch_y_mark = batch_y_mark.float().to(device)
 
-                    # print(seq_seasonal.shape)
                     if args.model == "TEMPO" or "multi" in args.model:
                         # ? where should trend, seasonal, and residual components come from?
                         # seq_trend = seq_trend.float().to(device)
@@ -431,16 +436,27 @@ def main(args):
         print(f"crps = {crps:.4f}")
 
 
+"""
+Use the following command to run:
+bash ./scripts/monash_prob_demo.sh
+"""
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GPT4TS")
 
     # TODO: add descriptions for each argument
     parser.add_argument("--model_id", type=str, default="weather_GTP4TS_multi-debug")
+
+    # get subdirectory to desired model
+    checkpoints_dir = "checkpoints"
+    checkpoints_subdirs = [name for name in os.listdir(checkpoints_dir)]
+    checkpoints_path = os.path.join(checkpoints_dir, checkpoints_subdirs[0])
     parser.add_argument(
         "--checkpoints",
         type=str,
-        default="/l/users/defu.cao/checkpoints_multi_dataset/",
+        default=checkpoints_path,
+        help="Relative path to desired model",
     )
+
     parser.add_argument("--task_name", type=str, default="long_term_forecast")
 
     parser.add_argument("--prompt", type=int, default=0)
@@ -479,7 +495,12 @@ if __name__ == "__main__":
     parser.add_argument("--hid_dim", type=int, default=16)
     parser.add_argument("--tmax", type=int, default=10)
 
-    parser.add_argument("--itr", type=int, default=3)
+    parser.add_argument(
+        "--itr",
+        type=int,
+        default=1,
+        help="Number of iterations to run training and inference loop",
+    )
     parser.add_argument("--cos", type=int, default=0)
     parser.add_argument(
         "--equal",
@@ -493,7 +514,14 @@ if __name__ == "__main__":
     )
 
     parser.add_argument("--stl_weight", type=float, default=0.01)
-    parser.add_argument("--config_path", type=str, default="./data_config.yml")
+
+    # get relative path to desired configuration
+    configs_dir = "configs"
+    configs = [name for name in os.listdir(configs_dir)]
+    config = "data_config.yml" if "data_config.yml" in configs else configs[0]
+    config_path = os.path.join(configs_dir, config)
+    parser.add_argument("--config_path", type=str, default=config_path)
+
     parser.add_argument("--datasets", type=str, default="exchange")
     parser.add_argument("--target_data", type=str, default="ETTm1")
     # eval_data
@@ -504,8 +532,12 @@ if __name__ == "__main__":
     parser.add_argument("--traffic_multiplier", type=int, default=1)
     parser.add_argument("--embed", type=str, default="timeF")
     parser.add_argument("--num_samples", type=int, default=30)
-
-    parser.add_argument("--train", type=bool, default=False)
+    parser.add_argument(
+        "--train",
+        type=bool,
+        default=True,
+        help="Set to true if you want to train the model",
+    )
 
     args = parser.parse_args()
     main(args)
