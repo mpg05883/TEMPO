@@ -263,11 +263,11 @@ def negative_binomial_nll(target, y_pred):
     return -log_prob.mean()
 
 
-def print_minibatch_update(
+def print_batch_update(
     i,
     epoch,
     loss,
-    start_of_minibatch_time,
+    start_of_batch_time,
     epoch_counter,
     train_steps,
 ):
@@ -275,7 +275,7 @@ def print_minibatch_update(
     logging.info(f"\Mini-batch: {i}, epoch: {epoch + 1}, loss: {loss.item():.7f}")
 
     # Compute average time per epoch
-    speed = (time.time() - start_of_minibatch_time) / epoch_counter
+    speed = (time.time() - start_of_batch_time) / epoch_counter
 
     # Compute remaining amount of time in seconds
     remaining_time_seconds = speed * ((args.train_epochs - epoch) * train_steps - i)
@@ -289,14 +289,15 @@ def main(args):
     # Load configuration
     config = get_init_config(args.config_path)
 
+    # Print configuration
     print_config(config)
 
+    # Print command line arguments
     print_args(args)
 
     for itr in range(args.itr):
-        logging.info(f"\n\n========== Iteration {itr} ==========")
+        logging.info(f"\n\n========== Iteration {itr + 1}/{args.itr} ==========")
 
-        model_path = "./checkpoints/TEMPO_checkpoints"
         if not args.load_pretrained_model:
             # Get name of model's directory
             settings = get_settings(args, itr)
@@ -396,14 +397,7 @@ def main(args):
                 train_loss = []
 
                 for i, data in tqdm(enumerate(train_loader), total=len(train_loader)):
-                    start_of_minibatch_time = time.time()
-
-                    if i % (len(train_loader) // 10) == 0:
-                        remaining_mini_batches = len(train_loader) - (i + 1)
-                        logging.info(
-                            f"Starting mini-batch {i + 1}/{remaining_mini_batches + 1}..."
-                        )
-
+                    start_of_batch_time = time.time()
                     epoch_counter += 1
 
                     batch_x, batch_y, batch_x_mark, batch_y_mark = (
@@ -453,7 +447,7 @@ def main(args):
                     else:
                         outputs = model(batch_x, itr)
 
-                    # Compute current mini-batch's loss
+                    # Compute current batch's loss
                     if (
                         args.loss_func == "prob"
                         or args.loss_func == "negative_binomial"
@@ -473,11 +467,11 @@ def main(args):
 
                     # Print update
                     if (i + 1) % 1000 == 0:
-                        print_minibatch_update(
+                        print_batch_update(
                             i,
                             epoch,
                             loss,
-                            start_of_minibatch_time,
+                            start_of_batch_time,
                             epoch_counter,
                             train_steps,
                         )
@@ -490,7 +484,7 @@ def main(args):
 
                 # Print update after going through current batch
                 logging.info(
-                    f"Epoch: {epoch + 1} cost time: {time.time() - start_of_epoch_time}"
+                    f"Epoch: {epoch + 1}, time elapsed: {((time.time() - start_of_epoch_time) / 60):.2f}"
                 )
 
                 # Compute average training set loss
@@ -526,11 +520,11 @@ def main(args):
         # model.load_state_dict(torch.load(best_model_path), strict=False)
 
         # Compute crps sum and crps
-        logging.info("------------------------------------")
-        logging.info("Computing CRPS SUM and CRPS...")
-        crps_sum, crps = test_probs(model, test_data, test_loader, args, device, itr)
-        logging.info(f"crps_sum = {crps_sum:.4f}")
-        logging.info(f"crps = {crps:.4f}")
+        # logging.info("------------------------------------")
+        # logging.info("Computing CRPS SUM and CRPS...")
+        # crps_sum, crps = test_probs(model, test_data, test_loader, args, device, itr)
+        # logging.info(f"crps_sum = {crps_sum:.4f}")
+        # logging.info(f"crps = {crps:.4f}")
 
 
 """
@@ -640,13 +634,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--load_pretrained_model",
         type=bool,
-        default=True,
+        default=False,
         help="Set to true if you want to load pre-trained TEMPO model",
     )
     parser.add_argument(
         "--train",
         type=bool,
-        default=False,
+        default=True,
         help="Set to true if you want to train the model",
     )
 
