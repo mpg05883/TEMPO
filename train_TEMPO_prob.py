@@ -65,33 +65,49 @@ def get_init_config(config_path=None):
 
 
 def print_config(config):
-    print(f"\n=== Config ===\n{OmegaConf.to_yaml(config)}")
+    logging.info(f"\n\n=== Config ===\n{OmegaConf.to_yaml(config)}")
 
 
 def print_args(args):
-    print("=== Command line arguments ===")
+    logging.info("=== Command line arguments ===")
     for key, value in vars(args).items():
-        print(f"{key}: {value}")
+        logging.info(f"{key}: {value}")
+
+
+def get_settings(args, itr, sl=336):
+    return "{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_gl{}_df{}_eb{}_itr{}".format(
+        args.model_id,
+        sl,
+        args.label_len,
+        args.pred_len,
+        args.d_model,
+        args.n_heads,
+        args.e_layers,
+        args.gpt_layers,
+        args.d_ff,
+        args.embed,
+        itr,
+    )
 
 
 def print_dataset_info(data, loader, name="Dataset"):
-    print(f"\n=== {name} Information ===")
-    print(f"Number of samples: {len(data)}")
-    print(f"Batch size: {loader.batch_size}")
-    print(f"Number of batches: {len(loader)}")
+    logging.info(f"\n\n=== {name} Information ===")
+    logging.info(f"Number of samples: {len(data)}")
+    logging.info(f"Batch size: {loader.batch_size}")
+    logging.info(f"Number of batches: {len(loader)}")
 
     attributes = ["features", "targets", "shape"]
     for attr in attributes:
         if hasattr(data, attr):
-            print(f"{attr}: {getattr(data, attr)}")
+            logging.info(f"{attr}: {getattr(data, attr)}")
 
     # for batch in loader:
     #     if isinstance(batch, (tuple, list)):
-    #         print("\nFirst batch shapes:")
+    #         logging.info("\nFirst batch shapes:")
     #         for i, item in enumerate(batch):
-    #             print(f"Item {i} shape: {item.shape if hasattr(item, 'shape') else 'N/A'}")
+    #             logging.info(f"Item {i} shape: {item.shape if hasattr(item, 'shape') else 'N/A'}")
     #     else:
-    #         print(f"\nFirst batch shape: {batch.shape if hasattr(batch, 'shape') else 'N/A'}")
+    #         logging.info(f"\nFirst batch shape: {batch.shape if hasattr(batch, 'shape') else 'N/A'}")
     #     break
 
 
@@ -247,70 +263,110 @@ def negative_binomial_nll(target, y_pred):
     return -log_prob.mean()
 
 
+def print_minibatch_update(
+    i,
+    epoch,
+    loss,
+    start_of_minibatch_time,
+    epoch_counter,
+    train_steps,
+):
+    # Print current mini-batch, epoch, and loss
+    logging.info(f"\Mini-batch: {i}, epoch: {epoch + 1}, loss: {loss.item():.7f}")
+
+    # Compute average time per epoch
+    speed = (time.time() - start_of_minibatch_time) / epoch_counter
+
+    # Compute remaining amount of time in seconds
+    remaining_time_seconds = speed * ((args.train_epochs - epoch) * train_steps - i)
+
+    logging.info(
+        f"\tAverage epoch speed: {speed:.4f}s/epoch, remaining time: {remaining_time_seconds:.4f}s"
+    )
+
+
 def main(args):
-    # Load model configurations
+    # Load configuration
     config = get_init_config(args.config_path)
 
-    # print_config(config)
-    # print_args(args)
+    print_config(config)
 
-    for iteration in range(args.itr):
+    print_args(args)
 
-        setting = "{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_gl{}_df{}_eb{}_itr{}".format(
-            args.model_id,
-            336,
-            args.label_len,
-            args.pred_len,
-            args.d_model,
-            args.n_heads,
-            args.e_layers,
-            args.gpt_layers,
-            args.d_ff,
-            args.embed,
-            iteration,
-        )
+    for itr in range(args.itr):
+        logging.info(f"\n\n========== Iteration {itr} ==========")
 
-        # # Get file path to checkpoints directory
-        path = os.path.join(args.checkpoints, setting)
+        model_path = "./checkpoints/TEMPO_checkpoints"
+        if not args.load_pretrained_model:
+            # Get name of model's directory
+            settings = get_settings(args, itr)
 
-        # # If path to checkpoints directory doesn't exist, then create it
-        if not os.path.exists(path):
-            os.makedirs(path)
+            # Create path to model's directory
+            model_path = os.path.join(args.checkpoints, settings)
+
+            # Create model's directory if it doesn't exist
+            if not os.path.exists(model_path):
+                os.makedirs(model_path)
+
+        logging.info(f"Model will be saved to {model_path}")
 
         # if args.freq == 0:
         #     args.freq = 'h'
 
         # Set device to run model on
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logging.info(f"Model will run on {device}")
 
-        # Load training and test data
-        train_data, train_loader, test_data, test_loader, vali_data, vali_loader = (
-            prepare_data_loaders(args, config)
-        )
+        # Load training, validation, and test sets
+        (
+            train_data,
+            train_loader,
+            test_data,
+            test_loader,
+            vali_data,
+            vali_loader,
+        ) = prepare_data_loaders(args, config)
 
-        time_now = time.time()
-
+        # Get number of training steps
         train_steps = len(train_loader)
 
-        if args.model == "PatchTST":
-            model = PatchTST(args, device)
-        elif args.model == "DLinear":
-            model = DLinear(args, device)
-        elif args.model == "TEMPO":
-            model = TEMPO(args, device)
-        elif args.model == "T5":
-            model = T54TS(args, device)
-        elif "ETSformer" in args.model:
-            model = ETSformer(args, device)
+        # Load model
+        if args.load_pretrained_model:
+            model = TEMPO.load_pretrained_model(
+                device=device,
+                repo_id="Melady/TEMPO",
+                filename="TEMPO-80M_v1.pth",
+                cfg=config,
+                cache_dir=model_path,
+            )
         else:
-            model = GPT4TS(args, device)
+            if args.model == "PatchTST":
+                model = PatchTST(args, device)
+            elif args.model == "DLinear":
+                model = DLinear(args, device)
+            elif args.model == "TEMPO":
+                model = TEMPO(args, device)
+            elif args.model == "T5":
+                model = T54TS(args, device)
+            elif "ETSformer" in args.model:
+                model = ETSformer(args, device)
+            else:
+                model = GPT4TS(args, device)
 
+        # Move model to specified device
         model.to(device)
 
+        # Get number of parameters model has
         params = model.parameters()
+        logging.info(f"Model has {params}")
+
+        # Initialize optimizer
         model_optim = torch.optim.Adam(params, lr=args.learning_rate)
+
+        # Initialize early stopping
         early_stopping = EarlyStopping(patience=args.patience, verbose=True)
 
+        # Set loss function
         if args.loss_func == "mse":
             criterion = nn.MSELoss()
         elif args.loss_func == "smape":
@@ -320,44 +376,70 @@ def main(args):
         elif args.loss_func == "negative_binomial":
             criterion = negative_binomial_nll
 
+        # Initialize scheduler
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             model_optim,
             T_max=args.tmax,
             eta_min=1e-8,
         )
 
+        # If args.train is set to true, then train model
         if args.train:
+            logging.info("\n\n========== Training model ==========")
+
             for epoch in range(args.train_epochs):
-                iter_count = 0
+                start_of_epoch_time = time.time()
+                logging.info(
+                    f"\n\n========== Epoch {epoch + 1}/{args.train_epochs} =========="
+                )
+                epoch_counter = 0
                 train_loss = []
-                epoch_time = time.time()
+
                 for i, data in tqdm(enumerate(train_loader), total=len(train_loader)):
+                    start_of_minibatch_time = time.time()
+
+                    if i % (len(train_loader) // 10) == 0:
+                        remaining_mini_batches = len(train_loader) - (i + 1)
+                        logging.info(
+                            f"Starting mini-batch {i + 1}/{remaining_mini_batches + 1}..."
+                        )
+
+                    epoch_counter += 1
 
                     batch_x, batch_y, batch_x_mark, batch_y_mark = (
-                        data[0],
-                        data[1],
+                        data[0],  # Input time series
+                        data[1],  # Future time series
                         data[2],
                         data[3],
                     )
-                    iter_count += 1
-                    model_optim.zero_grad()
-                    batch_x = batch_x.float().to(device)
 
+                    seq_trend, seq_seasonal, seq_resid = (
+                        data[4],  # Trend component
+                        data[5],  # Seasonal component
+                        data[6],  # Residual component
+                    )
+
+                    batch_x = batch_x.float().to(device)
                     batch_y = batch_y.float().to(device)
                     batch_x_mark = batch_x_mark.float().to(device)
                     batch_y_mark = batch_y_mark.float().to(device)
 
-                    if args.model == "TEMPO" or "multi" in args.model:
-                        # ? where should trend, seasonal, and residual components come from?
-                        # seq_trend = seq_trend.float().to(device)
-                        # seq_seasonal = seq_seasonal.float().to(device)
-                        # seq_resid = seq_resid.float().to(device)
-                        seq_trend, seq_seasonal, seq_resid = (None, None, None)
+                    seq_trend = seq_trend.float().to(device)
+                    seq_seasonal = seq_seasonal.float().to(device)
+                    seq_resid = seq_resid.float().to(device)
 
-                        # Run forward pass
+                    # Clear gradients
+                    model_optim.zero_grad()
+
+                    # Compute forward pass
+                    if args.model == "TEMPO" or "multi" in args.model:
                         outputs, loss_local = model(
-                            batch_x, iteration, seq_trend, seq_seasonal, seq_resid
-                        )  # + model(seq_seasonal, iteration) + model(seq_resid, iteration)
+                            batch_x,
+                            itr,
+                            seq_trend,
+                            seq_seasonal,
+                            seq_resid,
+                        )
                     elif "former" in args.model:
                         dec_inp = torch.zeros_like(
                             batch_y[:, -args.pred_len :, :]
@@ -369,8 +451,9 @@ def main(args):
                         )
                         outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                     else:
-                        outputs = model(batch_x, iteration)
+                        outputs = model(batch_x, itr)
 
+                    # Compute current mini-batch's loss
                     if (
                         args.loss_func == "prob"
                         or args.loss_func == "negative_binomial"
@@ -388,73 +471,94 @@ def main(args):
                             loss += args.stl_weight * loss_local
                     train_loss.append(loss.item())
 
+                    # Print update
                     if (i + 1) % 1000 == 0:
-                        print(
-                            f"\titers: {i + 1}, epoch: {epoch + 1} | loss: {loss.item():.7f}"
+                        print_minibatch_update(
+                            i,
+                            epoch,
+                            loss,
+                            start_of_minibatch_time,
+                            epoch_counter,
+                            train_steps,
                         )
-                        speed = (time.time() - time_now) / iter_count
-                        left_time = speed * (
-                            (args.train_epochs - epoch) * train_steps - i
-                        )
-                        print(
-                            f"\tspeed: {speed:.4f}s/iter; left time: {left_time:.4f}s"
-                        )
-                        iter_count = 0
-                        time_now = time.time()
+
+                    # Compute backward pass
                     loss.backward()
+
+                    # Update parameters
                     model_optim.step()
 
-                print(f"Epoch: {epoch + 1} cost time: {time.time() - epoch_time}")
-
-                train_loss = np.average(train_loss)
-                vali_loss = vali(
-                    model, vali_data, vali_loader, criterion, args, device, iteration
+                # Print update after going through current batch
+                logging.info(
+                    f"Epoch: {epoch + 1} cost time: {time.time() - start_of_epoch_time}"
                 )
 
-                print(
-                    f"Epoch: {epoch + 1}, Steps: {train_steps} | Train Loss: {train_loss:.7f} Vali Loss: {vali_loss:.7f}"
+                # Compute average training set loss
+                train_loss = np.average(train_loss)
+
+                # Compute validation set loss
+                vali_loss = vali(
+                    model, vali_data, vali_loader, criterion, args, device, itr
+                )
+
+                # Print current epoch's training and validation lkoss
+                logging.info(
+                    f"Epoch: {epoch + 1}, Steps: {train_steps} | Train Loss: {train_loss:.7f} Val Loss: {vali_loss:.7f}"
                 )
 
                 if args.cos:
                     scheduler.step()
-                    print("lr = {:.10f}".format(model_optim.param_groups[0]["lr"]))
+                    logging.info(
+                        "lr = {:.10f}".format(model_optim.param_groups[0]["lr"])
+                    )
                 else:
                     adjust_learning_rate(model_optim, epoch + 1, args)
-                early_stopping(vali_loss, model, path)
+
+                early_stopping(vali_loss, model, model_path)
                 if early_stopping.early_stop:
-                    print("Early stopping")
+                    logging.info("Early stopping")
                     break
 
-        # TODO: add if and else statements for prob forecasting
-        best_model_path = path + "/" + "checkpoint.pth"
-        model.load_state_dict(torch.load(best_model_path), strict=False)
-        print("------------------------------------")
-        crps_sum, crps = test_probs(
-            model, test_data, test_loader, args, device, iteration
-        )
-        print(f"crps_sum = {crps_sum:.4f}")
-        print(f"crps = {crps:.4f}")
+        # # Get file path to best model
+        # best_model_path = model_path + "/" + "checkpoint.pth"
+
+        # # Load best model
+        # model.load_state_dict(torch.load(best_model_path), strict=False)
+
+        # Compute crps sum and crps
+        logging.info("------------------------------------")
+        logging.info("Computing CRPS SUM and CRPS...")
+        crps_sum, crps = test_probs(model, test_data, test_loader, args, device, itr)
+        logging.info(f"crps_sum = {crps_sum:.4f}")
+        logging.info(f"crps = {crps:.4f}")
 
 
 """
-Use the following command to run:
+Use this command to run script:
 bash ./scripts/monash_prob_demo.sh
 """
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="GPT4TS")
+    parser = argparse.ArgumentParser(
+        description="Evaluates quality of model's probabilistic forecasts"
+    )
 
     # TODO: add descriptions for each argument
-    parser.add_argument("--model_id", type=str, default="weather_GTP4TS_multi-debug")
+    parser.add_argument(
+        "--model_id",
+        type=str,
+        default="weather_GTP4TS_multi-debug",
+    )
 
-    # get subdirectory to desired model
+    # Get path to desired model's directory
     checkpoints_dir = "checkpoints"
     checkpoints_subdirs = [name for name in os.listdir(checkpoints_dir)]
-    checkpoints_path = os.path.join(checkpoints_dir, checkpoints_subdirs[0])
+    checkpoint = checkpoints_subdirs[0]  # name of desired model's directory
+    checkpoints_path = os.path.join(checkpoints_dir, checkpoint)
     parser.add_argument(
         "--checkpoints",
         type=str,
         default=checkpoints_path,
-        help="Relative path to desired model",
+        help="Directory path to desired model",
     )
 
     parser.add_argument("--task_name", type=str, default="long_term_forecast")
@@ -470,7 +574,7 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=0.001)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--num_workers", type=int, default=0)
-    parser.add_argument("--train_epochs", type=int, default=10)
+    parser.add_argument("--train_epochs", type=int, default=1)
     parser.add_argument("--lradj", type=str, default="type3")  # for what
     parser.add_argument("--patience", type=int, default=5)
 
@@ -486,10 +590,10 @@ if __name__ == "__main__":
     parser.add_argument("--patch_size", type=int, default=16)
     parser.add_argument("--kernel_size", type=int, default=25)
 
-    parser.add_argument("--loss_func", type=str, default="mse")
+    parser.add_argument("--loss_func", type=str, default="prob")
     parser.add_argument("--pretrain", type=int, default=1)
     parser.add_argument("--freeze", type=int, default=1)
-    parser.add_argument("--model", type=str, default="GPT4TS_multi")
+    parser.add_argument("--model", type=str, default="TEMPO")
     parser.add_argument("--stride", type=int, default=8)
     parser.add_argument("--max_len", type=int, default=-1)
     parser.add_argument("--hid_dim", type=int, default=16)
@@ -515,10 +619,11 @@ if __name__ == "__main__":
 
     parser.add_argument("--stl_weight", type=float, default=0.01)
 
-    # get relative path to desired configuration
+    # Get file path to desired configuration
     configs_dir = "configs"
     configs = [name for name in os.listdir(configs_dir)]
-    config = "data_config.yml" if "data_config.yml" in configs else configs[0]
+    # Name of config file that'll be used
+    config = "run_TEMPO.yml"
     config_path = os.path.join(configs_dir, config)
     parser.add_argument("--config_path", type=str, default=config_path)
 
@@ -533,9 +638,15 @@ if __name__ == "__main__":
     parser.add_argument("--embed", type=str, default="timeF")
     parser.add_argument("--num_samples", type=int, default=30)
     parser.add_argument(
-        "--train",
+        "--load_pretrained_model",
         type=bool,
         default=True,
+        help="Set to true if you want to load pre-trained TEMPO model",
+    )
+    parser.add_argument(
+        "--train",
+        type=bool,
+        default=False,
         help="Set to true if you want to train the model",
     )
 

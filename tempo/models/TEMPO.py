@@ -3,26 +3,19 @@ import warnings
 
 import numpy as np
 import torch
+import torch.distributions as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 from huggingface_hub import hf_hub_download
 from omegaconf import OmegaConf
-from peft import (
-    LoraConfig,
-    PeftConfig,
-    PeftModel,
-    TaskType,
-    get_peft_config,
-    get_peft_model,
-)
-from torch import optim
-from transformers import BertModel, BertTokenizer, GPT2LMHeadModel, GPT2Tokenizer
+from peft import LoraConfig, get_peft_model
+from transformers import GPT2Tokenizer
 from transformers.models.gpt2.configuration_gpt2 import GPT2Config
 from transformers.models.gpt2.modeling_gpt2 import GPT2Model
 
-from tempo.embed import DataEmbedding, DataEmbedding_wo_time
 from tempo.utils.rev_in import RevIn
+from tempo.utils.tools import sample_negative_binomial
 
 criterion = nn.MSELoss()
 
@@ -327,7 +320,6 @@ class TEMPO(nn.Module):
         repo_id="Melady/TEMPO",
         filename="TEMPO-80M_v1.pth",
         cache_dir="./checkpoints/TEMPO_checkpoints",
-        probs=False,
     ):
         # Download the model checkpoint
         checkpoint_path = hf_hub_download(
@@ -398,11 +390,11 @@ class TEMPO(nn.Module):
         summary = summary_mapped.view(-1, 768)
         summary_embed_norm = self.l2_normalize(summary, dim=1)
         similarity = torch.matmul(summary_embed_norm, prompt_norm.t())
-        if not prompt_mask == None:
+        if prompt_mask is not None:
             idx = prompt_mask
         else:
             topk_sim, idx = torch.topk(similarity, k=self.top_k, dim=1)
-        if prompt_mask == None:
+        if prompt_mask is None:
             count_of_keys = torch.bincount(torch.flatten(idx), minlength=15)
             for i in range(len(count_of_keys)):
                 self.prompt_record[f"id_{i}"] += count_of_keys[i].item()
@@ -521,7 +513,7 @@ class TEMPO(nn.Module):
 
         x = self.rev_in_trend(x, "norm")
 
-        original_x = x
+        # original_x = x
 
         # Moving average for trend
         trend_local = self.moving_avg(x)
@@ -642,6 +634,7 @@ class TEMPO(nn.Module):
         if self.loss_func == "prob":
             outputs = rearrange(outputs, "b l m-> b m l", b=B).squeeze()
 
+            print(self.loss_func)
             mu = self.mu(outputs)
             sigma = F.softplus(self.sigma(outputs)) + 1e-6  # Ensure scale is positive
             nu = F.softplus(self.nu(outputs)) + 2  # Ensure degrees of freedom > 2
@@ -663,68 +656,94 @@ class TEMPO(nn.Module):
             return outputs, None
         return outputs, loss_local
 
-    def predict(self, x, pred_length=96):
+    def set_to_target_length(self, x):
         """
-        Predict using the TEMPO model.
+        Pads/truncates x so it has self.seq_len time steps
 
         Args:
         - x: Input time series data (shape: [B, L, M])
 
         Returns:
-        - Predicted output
+        - Padded/truncated version of x
         """
-        self.eval()  # Set the model to evaluation mode
+        # Maximum supported number of time steps in x
+        target_length = self.seq_len
 
-        x = (
-            torch.FloatTensor(x).unsqueeze(0).unsqueeze(2).to(self.device)
-        )  # Shape: [1, 336, 1]
-        x = self.rev_in_trend(x, "norm")
-
+        # Batch size, length, and number of channels
+        x = torch.squeeze(x, dim=0)
+        x = torch.squeeze(x, dim=1)
         B, L, M = x.shape
-        target_length = self.seq_len  # Maximum supported length
 
+        # If x is longer than target_length, then truncate it to the last
+        # target_length time steps
         if L > target_length:
             warnings.warn(
                 f"Input length {L} is larger than the maximum supported length of {target_length}. "
                 f"This may influence performance. Cutting the input to the last {target_length} time steps."
             )
-            x = x[:, -target_length:, :]
-        elif L < target_length:
-            pad_length = target_length - L
-            if pad_length <= L:
-                # Pad by repeating the time series
-                x_padded = torch.cat([x] * (target_length // L + 1), dim=1)[
-                    :, :target_length, :
-                ]
-            else:
-                # Pad with zeros at the beginning
-                padding = torch.zeros(B, pad_length, M, device=x.device)
-                x_padded = torch.cat([padding, x], dim=1)
 
-            x = x_padded
-            warnings.warn(
-                f"Input length {L} is smaller than the required length of {target_length}. "
-                f"The time series has been {'repeated' if pad_length <= L else 'zero-padded'} to reach the required length."
-            )
+            return x[:, -target_length:, :]
+
+        # remaining number of time steps for x to have target_length time steps
+        pad_length = target_length - L
+
+        warnings.warn(
+            f"Input length {L} is smaller than the required length of {target_length}. "
+            f"The time series has been {'repeated' if pad_length <= L else 'zero-padded'} to reach the required length."
+        )
+
+        if pad_length <= L:
+            # Pad by repeating the time series
+            x_padded = torch.cat([x] * (target_length // L + 1), dim=1)[
+                :, :target_length, :
+            ]
+        else:
+            # Pad with zeros at the beginning
+            padding = torch.zeros(B, pad_length, M, device=x.device)
+            x_padded = torch.cat([padding, x], dim=1)
+
+        return x_padded
+
+    def predict(self, x, pred_length=96):
+        """
+        Computes predictions for pred_length future time steps using the TEMPO
+        model and given input data.
+
+        Args:
+        - x: Input time series data (shape: [B, L, M])
+            - B: batch size
+            - L: length
+            - M: number of channels
+
+        Returns:
+        - Predicted values for pred_length future time steps
+        """
+        # Set model to evaluation mode
+        self.eval()
+
+        # Set x's shape to [1, 336, 1]
+        x = torch.FloatTensor(x).unsqueeze(0).unsqueeze(2).to(self.device)
+
+        # Normalize x
+        x = self.rev_in_trend(x, "norm")
+
+        # Pad/truncate x so it has self.seq_len time steps
+        x = self.set_to_target_length(x)
 
         # Ensure x is on the same device as the model
         x = x.to(self.device)
 
-        # with torch.no_grad():
-        #     outputs, _ = self.forward(x, test=True)
-        # # Extract the predicted values
-        # predicted_values = outputs.squeeze().numpy()[-pred_length:]
-        # return predicted_values
-
+        # Compute predictions for future time steps
         with torch.no_grad():
             current_input = x.clone()
-            all_predictions = []
+            all_predictions = []  # List of predictions
 
             while len(all_predictions) < pred_length:
                 # Forward pass
                 outputs, _ = self.forward(current_input, test=True)
                 outputs = self.rev_in_trend(outputs, "denorm")
                 step_size = outputs.shape[1]
+
                 # Extract the predicted values
                 predicted_values = outputs.cpu().squeeze().numpy()[-step_size:]
 
@@ -741,66 +760,80 @@ class TEMPO(nn.Module):
                 current_input = (
                     torch.FloatTensor(new_sequence).unsqueeze(0).unsqueeze(2)
                 )
+
         # Trim to the desired length
         return np.array(all_predictions[:pred_length])
 
     def predict_prob(self, x, pred_length=96):
         """
-        Predict using the TEMPO model.
+        Compute probabilistic predictions for pred_length future time steps
+        using the TEMPO model.
 
         Args:
         - x: Input time series data (shape: [B, L, M])
+            - B: batch size
+            - L: length
+            - M: number of channels
 
         Returns:
-        - Predicted output
+        - Student's t-distribution for each of the pred_length future time steps
         """
-        pass
-        # self.eval()  # Set the model to evaluation mode
+        # Set model to evaluation mode
+        self.eval()
 
-        # x = torch.FloatTensor(x).unsqueeze(0).unsqueeze(2).to(self.device)  # Shape: [1, 336, 1]
-        # x = self.rev_in_trend(x, 'norm')
+        # Set x's shape to [1, 336, 1]
+        x = torch.FloatTensor(x).unsqueeze(0).unsqueeze(2).to(self.device)
 
-        # B, L, M = x.shape
-        # target_length = self.seq_len  # Maximum supported length
+        # Normalize x
+        x = self.rev_in_trend(x, "norm")
 
-        # if L > target_length:
-        #     warnings.warn(f"Input length {L} is larger than the maximum supported length of {target_length}. "
-        #                   f"This may influence performance. Cutting the input to the last {target_length} time steps.")
-        #     x = x[:, -target_length:, :]
-        # elif L < target_length:
-        #     pad_length = target_length - L
-        #     if pad_length <= L:
-        #         # Pad by repeating the time series
-        #         x_padded = torch.cat([x] * (target_length // L + 1), dim=1)[:, :target_length, :]
-        #     else:
-        #         # Pad with zeros at the beginning
-        #         padding = torch.zeros(B, pad_length, M, device=x.device)
-        #         x_padded = torch.cat([padding, x], dim=1)
+        # Pad/truncate x so it has self.seq_len time steps
+        x = self.set_to_target_length(x)
 
-        #     x = x_padded
-        #     warnings.warn(f"Input length {L} is smaller than the required length of {target_length}. "
-        #                   f"The time series has been {'repeated' if pad_length <= L else 'zero-padded'} to reach the required length.")
+        # Ensure x is on the same device as the model
+        x = x.to(self.device)
 
-        # # Ensure x is on the same device as the model
-        # x = x.to(self.device)
+        # Compute probability distributions for future time steps
+        with torch.no_grad():
+            current_input = x.clone()
+            all_forecasts = []
 
-        # with torch.no_grad():
-        #     current_input = x.clone()
-        #     all_predictions = []
+            while len(all_forecasts) < pred_length:
+                outputs, _ = self.forward(current_input, test=True)
 
-        #     while len(all_predictions) < pred_length:
-        #         # Forward pass
-        #         outputs, _ = self.forward(current_input, test=True)
-        #         outputs = self.rev_in_trend(outputs, 'denorm')
-        #         step_size = outputs.shape[1]
-        #         # Extract the predicted values
-        #         predicted_values = outputs.cpu().squeeze().numpy()[-step_size:]
+                if self.loss_func == "prob":
+                    mu, sigma, nu = outputs
+                    # Create Student's t-distribution
+                    student_t = dist.StudentT(df=nu, loc=mu, scale=sigma)
 
-        #         # Append to all predictions
-        #         all_predictions.extend(predicted_values)
+                    # Generate num_samples samples for each prediction
+                    probabilistic_forecasts = student_t.rsample((self.num_samples,))
 
-        #         # Update the input for the next iteration
-        #         new_sequence = np.concatenate([current_input.cpu().squeeze().numpy()[step_size:], predicted_values])
-        #         current_input = torch.FloatTensor(new_sequence).unsqueeze(0).unsqueeze(2)
-        # # Trim to the desired length
-        # return np.array(all_predictions[:pred_length])
+                elif self.loss_func == "negative_binomial":
+                    mu, alpha = outputs
+                    probabilistic_forecasts = sample_negative_binomial(
+                        mu, alpha, self.num_samples
+                    )
+
+                print(self.loss_func)
+                all_forecasts.append(probabilistic_forecasts.cpu().numpy())
+                step_size = probabilistic_forecasts.shape[2]
+
+                # Use the probability distribution at each future time step
+                # to get the most likely value at each future time step
+                predicted_values = (
+                    probabilistic_forecasts.mean(dim=0).cpu().numpy()[-step_size:]
+                )
+
+                # Update current input
+                new_sequence = np.concatenate(
+                    [
+                        current_input.cpu().squeeze().numpy()[step_size:],
+                        predicted_values,
+                    ]
+                )
+                current_input = (
+                    torch.FloatTensor(new_sequence).unsqueeze(0).unsqueeze(2)
+                )
+
+        return np.concatenate(all_forecasts, axis=1)[:pred_length]

@@ -25,7 +25,7 @@ enc_in: 7
 c_out: 1
 patch_size: 16
 kernel_size: 25
-loss_func: mse
+loss_func: prob
 pretrain: 0
 freeze: 1
 model: TEMPO
