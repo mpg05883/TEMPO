@@ -484,7 +484,7 @@ def main(args):
 
                 # Print update after going through current batch
                 logging.info(
-                    f"Epoch: {epoch + 1}, time elapsed: {((time.time() - start_of_epoch_time) / 60):.2f}"
+                    f"Epoch: {epoch + 1}, time elapsed: {((time.time() - start_of_epoch_time) / 60):.2f} minutes"
                 )
 
                 # Compute average training set loss

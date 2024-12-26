@@ -1,9 +1,10 @@
 import os
 import pickle
 
-import datasets
 import numpy as np
 import pandas as pd
+
+import datasets
 
 
 def load_all_datasets(directory):

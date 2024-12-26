@@ -3,11 +3,8 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 from torch import optim
-from transformers import (
-    T5Config,  # import T5 package
-    T5ForConditionalGeneration,
-    T5Tokenizer,
-)
+from transformers import T5Config  # import T5 package
+from transformers import T5ForConditionalGeneration, T5Tokenizer
 
 
 class T54TS(nn.Module):

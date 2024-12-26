@@ -1,9 +1,10 @@
 import pickle
 
-import datasets
 import numpy as np
 import pandas as pd
 from statsmodels.tsa.seasonal import STL
+
+import datasets
 
 period_map = {
     "ercot": 24,  # Daily cycle (hourly data)
