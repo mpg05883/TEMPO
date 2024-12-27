@@ -88,7 +88,7 @@ python train_TEMPO_prob.py \
     --patch_size 16 \
     --stride 8 \
     --gpt_layer $gpt_layer \
-    --itr 3 \
+    --itr 1 \
     --model $model \
     --tmax $tmax \
     --cos 1 \
