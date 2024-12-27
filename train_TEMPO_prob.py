@@ -511,9 +511,17 @@ def main(args):
         print("\n------------------------------------")
         print("Computing CRPS SUM and CRPS...")
         # TODO: add flag to call visual()
-        crps_sum, crps = test_probs(model, test_data, test_loader, args, device, itr)
-        print(f"crps_sum = {crps_sum:.4f}")
-        print(f"crps = {crps:.4f}")
+        crps_sum, crps = test_probs(
+            model,
+            test_data,
+            test_loader,
+            args,
+            device,
+            itr,
+            plot=True,
+        )
+        print(f"CRPS_Sum: {crps_sum:.4f}")
+        print(f"CRPS: {crps:.4f}")
 
 
 """

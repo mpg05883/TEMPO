@@ -764,7 +764,15 @@ class TEMPO(nn.Module):
         # Trim to the desired length
         return np.array(all_predictions[:pred_length])
 
-    def predict_prob(self, x, pred_length=96):
+    def predict_prob(
+        self,
+        x,
+        num_samples,
+        trend=None,
+        seasonal=None,
+        residual=None,
+        pred_len=96,
+    ):
         """
         Compute probabilistic predictions for pred_length future time steps
         using the TEMPO model.
@@ -776,64 +784,27 @@ class TEMPO(nn.Module):
             - M: number of channels
 
         Returns:
-        - Student's t-distribution for each of the pred_length future time steps
+        - Probability distribution for each of the pred_length future time steps
         """
-        # Set model to evaluation mode
-        self.eval()
+        # Compute forward pass
+        outputs, _ = self.forward(x, trend=trend, season=seasonal, noise=residual)
 
-        # Set x's shape to [1, 336, 1]
-        x = torch.FloatTensor(x).unsqueeze(0).unsqueeze(2).to(self.device)
+        # Compute probabilistic forecasts
+        if self.loss_func == "prob":
+            # Get Student's t-distribution parameters
+            mu, sigma, nu = outputs
 
-        # Normalize x
-        x = self.rev_in_trend(x, "norm")
+            # Create Student's t-distribution
+            student_t = dist.StudentT(df=nu, loc=mu, scale=sigma)
 
-        # Pad/truncate x so it has self.seq_len time steps
-        x = self.set_to_target_length(x)
+            # Generate num_samples samples for each prediction
+            probabilistic_forecasts = student_t.rsample((num_samples,))
 
-        # Ensure x is on the same device as the model
-        x = x.to(self.device)
+        elif self.loss_func == "negative_binomial":
+            # Get Negative Binomial distribution parameters
+            mu, alpha = outputs
 
-        # Compute probability distributions for future time steps
-        with torch.no_grad():
-            current_input = x.clone()
-            all_forecasts = []
+            # Generate num_samples samples for each prediction
+            probabilistic_forecasts = sample_negative_binomial(mu, alpha, num_samples)
 
-            while len(all_forecasts) < pred_length:
-                outputs, _ = self.forward(current_input, test=True)
-
-                if self.loss_func == "prob":
-                    mu, sigma, nu = outputs
-                    # Create Student's t-distribution
-                    student_t = dist.StudentT(df=nu, loc=mu, scale=sigma)
-
-                    # Generate num_samples samples for each prediction
-                    probabilistic_forecasts = student_t.rsample((self.num_samples,))
-
-                elif self.loss_func == "negative_binomial":
-                    mu, alpha = outputs
-                    probabilistic_forecasts = sample_negative_binomial(
-                        mu, alpha, self.num_samples
-                    )
-
-                print(self.loss_func)
-                all_forecasts.append(probabilistic_forecasts.cpu().numpy())
-                step_size = probabilistic_forecasts.shape[2]
-
-                # Use the probability distribution at each future time step
-                # to get the most likely value at each future time step
-                predicted_values = (
-                    probabilistic_forecasts.mean(dim=0).cpu().numpy()[-step_size:]
-                )
-
-                # Update current input
-                new_sequence = np.concatenate(
-                    [
-                        current_input.cpu().squeeze().numpy()[step_size:],
-                        predicted_values,
-                    ]
-                )
-                current_input = (
-                    torch.FloatTensor(new_sequence).unsqueeze(0).unsqueeze(2)
-                )
-
-        return np.concatenate(all_forecasts, axis=1)[:pred_length]
+        return probabilistic_forecasts
