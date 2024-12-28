@@ -26,13 +26,7 @@ from tempo.models.GPT4TS import GPT4TS
 from tempo.models.PatchTST import PatchTST
 from tempo.models.T5 import T54TS
 from tempo.models.TEMPO import TEMPO
-from tempo.utils.tools import (
-    EarlyStopping,
-    adjust_learning_rate,
-    test_probs,
-    vali,
-    visual,
-)
+from tempo.utils.tools import EarlyStopping, adjust_learning_rate, test_probs, vali
 
 warnings.filterwarnings("ignore")
 
@@ -90,7 +84,7 @@ def get_settings(args, itr, sl=336):
 
 
 def print_dataset_info(data, loader, name="Dataset"):
-    print(f"\n\n=== {name} Information ===")
+    print(f"\n=== {name} Information ===")
     print(f"Number of samples: {len(data)}")
     print(f"Batch size: {loader.batch_size}")
     print(f"Number of batches: {len(loader)}")
@@ -288,23 +282,21 @@ def main(args):
     # Load configuration
     config = get_init_config(args.config_path)
 
-    # Print configuration
-    print_config(config)
-
-    # Print command line arguments
-    print_args(args)
+    if args.print_args_and_config:
+        print_args(args)
+        print_config(config)
 
     for itr in range(args.itr):
         print(f"\n========== Iteration {itr + 1}/{args.itr} ==========")
 
         if not args.load_finetuned_model:
-            # Get name of model's directory
+            # Get name of directory where model will be saved
             settings = get_settings(args, itr)
 
-            # Create path to model's directory
+            # Create path to directory where model will be saved
             model_path = os.path.join(args.checkpoints, settings)
 
-            # Create model's directory if it doesn't exist
+            # Create directory where model will be saved
             if not os.path.exists(model_path):
                 os.makedirs(model_path)
             print(f"Model will be saved to {model_path}")
@@ -356,14 +348,11 @@ def main(args):
         # Move model to specified device
         model.to(device)
 
-        # Get number of parameters model has
-        params = sum(p.numel() for p in model.parameters())
-        print(f"Model has {params:,} parameters")
-
         # If args.load_finetuned_model is set to false, then train model
         if not args.load_finetuned_model:
             print("\n========== Training model ==========")
             # Initialize optimizer
+            params = model.parameters()
             model_optim = torch.optim.Adam(params, lr=args.learning_rate)
 
             # Initialize early stopping
@@ -510,7 +499,6 @@ def main(args):
         # Compute crps sum and crps
         print("\n------------------------------------")
         print("Computing CRPS SUM and CRPS...")
-        # TODO: add flag to call visual()
         crps_sum, crps = test_probs(
             model,
             test_data,
@@ -518,7 +506,6 @@ def main(args):
             args,
             device,
             itr,
-            plot=True,
         )
         print(f"CRPS_Sum: {crps_sum:.4f}")
         print(f"CRPS: {crps:.4f}")
@@ -565,19 +552,17 @@ if __name__ == "__main__":
         "--seq_len",
         type=int,
         default=512,
-        help="Input sequence's length",
     )
     parser.add_argument(
         "--pred_len",
         type=int,
         default=96,
-        help="Predicted sequence's length",
+        help="Number of future time steps to generate predictions for",
     )
     parser.add_argument(
         "--label_len",
         type=int,
         default=48,
-        help="Ground truth sequence's length",
     )
     parser.add_argument("--decay_fac", type=float, default=0.9)
     parser.add_argument(
@@ -590,14 +575,14 @@ if __name__ == "__main__":
         "--batch_size",
         type=int,
         default=128,
-        help="Batch size to use during training and inference",
+        help="Batch size to use during training",
     )
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument(
         "--train_epochs",
         type=int,
         default=1,
-        help="Number of epochs for training",
+        help="Number of training epochs",
     )
     parser.add_argument("--lradj", type=str, default="type3")  # for what
     parser.add_argument("--patience", type=int, default=5)
@@ -611,7 +596,7 @@ if __name__ == "__main__":
         "--dropout",
         type=float,
         default=0.3,
-        help="Probability of a neuron being set to zero in range [0.0, 1.0]",
+        help="Probability of dropout in range [0.0, 1.0]",
     )
     parser.add_argument("--enc_in", type=int, default=7)
     parser.add_argument("--c_out", type=int, default=7)
@@ -622,7 +607,7 @@ if __name__ == "__main__":
         type=str,
         choices=["mse", "prob", "negative_binomial"],
         default="prob",
-        help="Loss function to minimize during training",
+        help="Loss function for training",
     )
     parser.add_argument("--pretrain", type=int, default=1)
     parser.add_argument("--freeze", type=int, default=1)
@@ -631,7 +616,7 @@ if __name__ == "__main__":
         type=str,
         choices=["DLinear", "TEMPO", "T5", "ETSformer"],
         default="TEMPO",
-        help="Name of model architecture to used",
+        help="Model architecture",
     )
     parser.add_argument("--stride", type=int, default=8)
     parser.add_argument("--max_len", type=int, default=-1)
@@ -679,7 +664,7 @@ if __name__ == "__main__":
         "--config_path",
         type=str,
         default=config_path,
-        help="Path to configuration file that'll be used",
+        help="Path to configuration file",
     )
     parser.add_argument(
         "--datasets",
@@ -705,10 +690,16 @@ if __name__ == "__main__":
         help="Number of samples to use when computing probabilistic forecasts",
     )
     parser.add_argument(
+        "--print_args_and_config",
+        type=bool,
+        default=False,
+        help="Set to true to print the cmd line args and config",
+    )
+    parser.add_argument(
         "--load_finetuned_model",
         type=bool,
         default=True,
-        help="Set to true if you want to load fine-tuned TEMPO model",
+        help="Set to true load fine-tuned TEMPO model",
     )
     finetuned_model_checkpoint = os.path.join(checkpoints_dir, "Monash_1")
     finetuned_model_checkpoint = os.path.join(
@@ -719,9 +710,11 @@ if __name__ == "__main__":
         finetuned_model_checkpoint,
         "checkpoint.pth",
     )
-    print(f"Fine-tuned model checkpoint: {finetuned_model_checkpoint}")
     parser.add_argument(
-        "--finetuned_model_checkpoint", type=str, default=finetuned_model_checkpoint
+        "--finetuned_model_checkpoint",
+        type=str,
+        default=finetuned_model_checkpoint,
+        help="File path to finetuned model's checkpoint",
     )
 
     args = parser.parse_args()

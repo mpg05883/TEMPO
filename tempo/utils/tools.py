@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime
 from distutils.util import strtobool
 
@@ -188,12 +189,18 @@ class StandardScaler:
         return (data * self.std) + self.mean
 
 
-def visual(true, preds=None, name="./pic/test.pdf"):
+def visual(true, preds=None, name="./pics/test.pdf"):
     """
     Results visualization
     """
+    # If 'pics' directory doesn't exist, then create it
+    if not os.path.exists("pics"):
+        os.makedirs("pics")
+
+    # Create plot
     plt.figure()
-    plt.plot(true, label="GroundTruth", linewidth=2)
+    plt.title("Ground Truth vs Predicted Values")
+    plt.plot(true, label="Ground Truth", linewidth=2)
     if preds is not None:
         plt.plot(preds, label="Prediction", linewidth=2)
     plt.legend()
@@ -603,19 +610,13 @@ def sample_negative_binomial(mu, alpha, num_samples=1):
     return samples
 
 
-def test_probs(model, test_data, test_loader, args, device, itr, plot=False):
-    # Initialize accumulators for errors
-    # total_mae = 0
-    # total_mse = 0
-    # n_samples = 0
-
-    preds = []  # Predicted values
-    trues = []  # Ground truth values
+def test_probs(model, test_data, test_loader, args, device, itr, plot=True):
+    distributions = []  # Probability distributions at future time steps
+    means = []  # Predicted values at future time steps
+    trues = []  # Ground truth values at future time steps
     masks = []
-    # means = []
-    # stds = []
 
-    model.eval()  # Set model to evlauation mode
+    model.eval()  # Set to evlauation mode
 
     with torch.no_grad():
         for _, data in tqdm(enumerate(test_loader), total=len(test_loader)):
@@ -626,12 +627,12 @@ def test_probs(model, test_data, test_loader, args, device, itr, plot=False):
                 data[3],
             )
 
+            seq_trend, seq_seasonal, seq_resid = data[4], data[5], data[6]
+
             batch_x = batch_x.float().to(device)
             batch_x_mark = batch_x_mark.float().to(device)
             batch_y_mark = batch_y_mark.float().to(device)
             batch_y = batch_y.float()
-
-            seq_trend, seq_seasonal, seq_resid = data[4], data[5], data[6]
 
             seq_trend = seq_trend.float().to(device)
             seq_seasonal = seq_seasonal.float().to(device)
@@ -649,8 +650,12 @@ def test_probs(model, test_data, test_loader, args, device, itr, plot=False):
                     pred_len=args.pred_len,
                 )
 
-                # Save predicted values
-                preds.append(probabilistic_forecasts.cpu().numpy())
+                # Save probability distributions
+                distribution = probabilistic_forecasts.cpu().numpy()
+                distributions.append(distribution)
+
+                # Get mean at each time step
+                means.append(distribution.mean(axis=0))
 
                 # Save ground truth values
                 trues.append(batch_y[:, :, channel : channel + 1].cpu().numpy())
@@ -661,24 +666,34 @@ def test_probs(model, test_data, test_loader, args, device, itr, plot=False):
                     .cpu()
                     .numpy()
                 )
-
             # Empty cache
             torch.cuda.empty_cache()
 
+    batch_index = 0
+    instance_index = 0
+    if plot:
+        visual(
+            trues[batch_index][instance_index],
+            means[batch_index][instance_index],
+            name="./pics/test_probs.png",
+        )
+
     trues = np.array(trues)
-    preds = np.array(preds)
+    means = np.array(means)
+
+    distributions = np.array(distributions)
     masks = np.array(masks)
     trues = np.swapaxes(trues.squeeze(), -2, -3)
     unormzalized_gt_data = np.swapaxes(trues.squeeze(), -1, -2)
     masks = np.swapaxes(masks.squeeze(), -2, -3)
     target_mask = np.swapaxes(masks.squeeze(), -1, -2)
-    preds = np.transpose(preds.squeeze(), (2, 1, 3, 0))
+    distributions = np.transpose(distributions.squeeze(), (2, 1, 3, 0))
 
     # low_q = np.quantile(preds, 0.05, axis=1)
     # high_q = np.quantile(preds, 0.95, axis=1)
     # mid_q = np.quantile(preds, 0.5, axis=1)
 
-    unormalized_synthetic_data = preds
+    unormalized_synthetic_data = distributions
 
     crps_sum = calc_quantile_CRPS_sum(
         torch.Tensor(unormzalized_gt_data),
@@ -695,8 +710,5 @@ def test_probs(model, test_data, test_loader, args, device, itr, plot=False):
         mean_scaler=0,
         scaler=1,
     )
-
-    if plot:
-        visual(trues, preds)
 
     return crps_sum, crps

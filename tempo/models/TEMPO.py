@@ -774,7 +774,7 @@ class TEMPO(nn.Module):
         pred_len=96,
     ):
         """
-        Compute probabilistic predictions for pred_length future time steps
+        Computes probabilistic predictions for pred_len future time steps
         using the TEMPO model.
 
         Args:
@@ -782,11 +782,16 @@ class TEMPO(nn.Module):
             - B: batch size
             - L: length
             - M: number of channels
+        - num_samples: Number of samples to use when computing distributions
+        - trend: Trend component
+        - seasonal: Seasonal component
+        - residual: Residual component
+        - pred_len: Number of future time steps to compute distributions for
 
         Returns:
-        - Probability distribution for each of the pred_length future time steps
+        - Probability distribution for each of the pred_len future time steps
         """
-        # Compute forward pass
+        # Forward pass
         outputs, _ = self.forward(x, trend=trend, season=seasonal, noise=residual)
 
         # Compute probabilistic forecasts
@@ -798,13 +803,13 @@ class TEMPO(nn.Module):
             student_t = dist.StudentT(df=nu, loc=mu, scale=sigma)
 
             # Generate num_samples samples for each prediction
-            probabilistic_forecasts = student_t.rsample((num_samples,))
+            probabilistic_forecast = student_t.rsample((num_samples,))
 
         elif self.loss_func == "negative_binomial":
             # Get Negative Binomial distribution parameters
             mu, alpha = outputs
 
             # Generate num_samples samples for each prediction
-            probabilistic_forecasts = sample_negative_binomial(mu, alpha, num_samples)
+            probabilistic_forecast = sample_negative_binomial(mu, alpha, num_samples)
 
-        return probabilistic_forecasts
+        return probabilistic_forecast
