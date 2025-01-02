@@ -53,15 +53,37 @@ SEASONALITY_MAP = {
 
 
 def get_init_config(config_path=None):
+    """
+    Retrieves an initial configuration from a specified file path.
+
+    Args:
+        config_path (str, optional): Path to a configuration file that'll be
+        used to initialize the model. Defaults to None.
+
+    Returns:
+        config (OmegaConf): Configuration object for initializing the model
+    """
     config = OmegaConf.load(config_path)
     return config
 
 
-def print_config(config):
+def print_config(config: OmegaConf):
+    """
+    Prints a yaml dump of a specified configuration
+
+    Args:
+        config (OmegaConf): The configuration to be printed
+    """
     print(f"\n\n=== Config ===\n{OmegaConf.to_yaml(config)}")
 
 
 def print_args(args):
+    """
+    Prints each key-value pair in an ArgumentParser
+
+    Args:
+        args (ArgumentParser): An object containing the command line arguments
+    """
     print("=== Command line arguments ===")
     for key, value in vars(args).items():
         print(f"{key}: {value}")
@@ -221,6 +243,17 @@ def _combine_datasets(datasets):
 
 
 def studentT_nll(y_true, y_pred):
+    """
+    Loss function where the loss is calculated as the negative log-likelihood
+    of a Student's t-distribution
+
+    Args:
+        y_true: List of true values
+        y_pred: List of predicted values
+
+    Returns:
+        _type_: Negative log-likelihood
+    """
     y_true = y_true.squeeze()
     mu, sigma, nu = y_pred[0], y_pred[1], y_pred[2]
 
@@ -236,6 +269,17 @@ def studentT_nll(y_true, y_pred):
 
 
 def negative_binomial_nll(target, y_pred):
+    """
+    Loss function where the loss is calculated as the negative log-likelihood
+    of a Negative Binomial distribution
+
+    Args:
+        target: List of true values
+        y_pred: List of predicted values
+
+    Returns:
+        _type_: Negative log-likelihood
+    """
     # Compute negative log-likelihood of Negative Binomial distribution
     mu, alpha = y_pred[0], y_pred[1]
     if len(target.shape) != 3:
@@ -301,13 +345,6 @@ def main(args):
                 os.makedirs(model_path)
             print(f"Model will be saved to {model_path}")
 
-        # if args.freq == 0:
-        #     args.freq = 'h'
-
-        # Set device to run model on
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Model will run on {device}")
-
         # Load training, validation, and test sets
         (
             train_data,
@@ -320,6 +357,10 @@ def main(args):
 
         # Get number of training steps
         train_steps = len(train_loader)
+
+        # Set device to run model on
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Model will run on {device}")
 
         # Load model
         if args.load_finetuned_model:
@@ -376,7 +417,7 @@ def main(args):
             )
 
             for epoch in range(args.train_epochs):
-                start_of_epoch_time = time.time()
+                epoch_start_time = time.time()
                 print(f"\n========== Epoch {epoch + 1}/{args.train_epochs} ==========")
                 epoch_counter = 0
                 train_loss = []
@@ -469,7 +510,7 @@ def main(args):
 
                 # Print update after going through current batch
                 print(
-                    f"Epoch: {epoch + 1}, time elapsed: {((time.time() - start_of_epoch_time) / 60):.0f} minutes"
+                    f"Epoch: {epoch + 1}, time elapsed: {((time.time() - epoch_start_time) / 60):.0f} minutes"
                 )
 
                 # Compute average training set loss
@@ -505,7 +546,6 @@ def main(args):
             test_loader,
             args,
             device,
-            itr,
         )
         print(f"CRPS_Sum: {crps_sum:.4f}")
         print(f"CRPS: {crps:.4f}")

@@ -610,10 +610,27 @@ def sample_negative_binomial(mu, alpha, num_samples=1):
     return samples
 
 
-def test_probs(model, test_data, test_loader, args, device, itr, plot=True):
+def test_probs(model, test_data, test_loader, args, device, plot=True):
+    """
+    Evaluates the quality of a given model's proabilistic forecasts by
+    computing the CRPS SUM and CRPS of the true values and the predicted
+    probability distributions for each future time step
+
+    Args:
+        model: Model that'll be computing the probabilistic forecasts
+        test_data: Test dataset
+        test_loader: Dataloader for the test dataset
+        args: Command line arguments
+        device: Device to run the model on
+        plot (bool, optional): Set to True to create plot of predicted values
+        vs true values. Defaults to True.
+
+    Returns:
+        tuple: (crps_sum, crps)
+    """
     distributions = []  # Probability distributions at future time steps
     means = []  # Predicted values at future time steps
-    trues = []  # Ground truth values at future time steps
+    trues = []  # True values at future time steps
     masks = []
 
     model.eval()  # Set to evlauation mode
@@ -657,7 +674,7 @@ def test_probs(model, test_data, test_loader, args, device, itr, plot=True):
                 # Get mean at each time step
                 means.append(distribution.mean(axis=0))
 
-                # Save ground truth values
+                # Save true values
                 trues.append(batch_y[:, :, channel : channel + 1].cpu().numpy())
 
                 # Save masks
@@ -669,8 +686,8 @@ def test_probs(model, test_data, test_loader, args, device, itr, plot=True):
             # Empty cache
             torch.cuda.empty_cache()
 
-    batch_index = 0
-    instance_index = 0
+    batch_index = 0  # Index of which batch will be plotted
+    instance_index = 0  # Index of which instance will be plotted
     if plot:
         visual(
             trues[batch_index][instance_index],
@@ -689,12 +706,9 @@ def test_probs(model, test_data, test_loader, args, device, itr, plot=True):
     target_mask = np.swapaxes(masks.squeeze(), -1, -2)
     distributions = np.transpose(distributions.squeeze(), (2, 1, 3, 0))
 
-    # low_q = np.quantile(preds, 0.05, axis=1)
-    # high_q = np.quantile(preds, 0.95, axis=1)
-    # mid_q = np.quantile(preds, 0.5, axis=1)
-
     unormalized_synthetic_data = distributions
 
+    # Compute CRPS SUM
     crps_sum = calc_quantile_CRPS_sum(
         torch.Tensor(unormzalized_gt_data),
         torch.Tensor(unormalized_synthetic_data),
@@ -703,6 +717,7 @@ def test_probs(model, test_data, test_loader, args, device, itr, plot=True):
         scaler=1,
     )
 
+    # Compute CRPS
     crps = calc_quantile_CRPS(
         torch.Tensor(unormzalized_gt_data),
         torch.Tensor(unormalized_synthetic_data),
