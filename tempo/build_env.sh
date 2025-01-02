@@ -8,3 +8,6 @@ conda activate tempo
 
 # Install the requirements using pip
 pip install -r requirements.txt
+
+# Install timeagi package
+pip install timeagi
