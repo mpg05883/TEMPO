@@ -38,15 +38,9 @@ TEMPO is one of the very first open source **Time Series Foundation Models** for
 - **Oct 2023**: 🚀 TEMPO [paper](https://arxiv.org/pdf/2310.04948) released on Arxiv!
 
 ## Build the environment
-
+Run the following command to build the conda envionrment
 ```
-conda create -n tempo python=3.8
-```
-```
-conda activate tempo
-```
-```
-pip install timeagi
+./tempo/build_env.sh
 ```
 
 ## Script Demo
