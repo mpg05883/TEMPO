@@ -546,6 +546,8 @@ def main(args):
             test_loader,
             args,
             device,
+            read_values=args.read_values,
+            values_file=args.values_file,
         )
         print(f"CRPS_Sum: {crps_sum:.4f}")
         print(f"CRPS: {crps:.4f}")
@@ -755,6 +757,18 @@ if __name__ == "__main__":
         type=str,
         default=finetuned_model_checkpoint,
         help="File path to finetuned model's checkpoint",
+    )
+    parser.add_argument(
+        "--read_values",
+        type=bool,
+        default=True,
+        help="Set to True to read predicted and true values from a .csv file",
+    )
+    parser.add_argument(
+        "--values_file",
+        type=str,
+        default="values.csv",
+        help="Name of .csv file where predicted and true will be read from",
     )
 
     args = parser.parse_args()

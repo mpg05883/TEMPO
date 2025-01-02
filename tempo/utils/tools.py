@@ -189,22 +189,51 @@ class StandardScaler:
         return (data * self.std) + self.mean
 
 
-def visual(true, preds=None, name="./pics/test.pdf"):
+def visual(
+    true,
+    preds=None,
+    lower_bounds=None,
+    upper_bounds=None,
+    confidence_level=95,
+    file_name="pred_vs_true.png",
+):
     """
-    Results visualization
+    Creates plot of true values and saves plot to a file with a given file name.
+    Plots predicted values if they're given.
+
+    Args:
+        true: List of true values
+        preds (optional): List of predicted values. Defaults to None.
+        pred_interval (bool, optional): Set to true to plot prediction
+                                        interval with 95% confidence interval.
+                                        Defaults to False.
+        file_name (str, optional): Name of file where plot will be saved.
+                                   Defaults to "pred_vs_true.png".
     """
-    # If 'pics' directory doesn't exist, then create it
-    if not os.path.exists("pics"):
-        os.makedirs("pics")
+
+    # If 'plots' directory doesn't exist, then create it
+    directory = "./plots"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
 
     # Create plot
     plt.figure()
     plt.title("Ground Truth vs Predicted Values")
     plt.plot(true, label="Ground Truth", linewidth=2)
     if preds is not None:
-        plt.plot(preds, label="Prediction", linewidth=2)
+        plt.plot(preds, label="Predicted", linewidth=2)
+
+        if lower_bounds is not None and upper_bounds is not None:
+            plt.fill_between(
+                x=range(len(preds)),
+                y1=lower_bounds,
+                y2=upper_bounds,
+                color="orange",
+                alpha=0.2,
+                label=f"Prediction Interval ({confidence_level}%)",
+            )
     plt.legend()
-    plt.savefig(name, bbox_inches="tight")
+    plt.savefig(os.path.join(directory, file_name), bbox_inches="tight")
 
 
 def convert_tsf_to_dataframe(
@@ -610,7 +639,16 @@ def sample_negative_binomial(mu, alpha, num_samples=1):
     return samples
 
 
-def test_probs(model, test_data, test_loader, args, device, plot=True):
+def test_probs(
+    model,
+    test_data,
+    test_loader,
+    args,
+    device,
+    plot=True,
+    read_values=False,
+    values_file=None,
+):
     """
     Evaluates the quality of a given model's proabilistic forecasts by
     computing the CRPS SUM and CRPS of the true values and the predicted
@@ -622,84 +660,128 @@ def test_probs(model, test_data, test_loader, args, device, plot=True):
         test_loader: Dataloader for the test dataset
         args: Command line arguments
         device: Device to run the model on
-        plot (bool, optional): Set to True to create plot of predicted values
+        plot (bool): Set to True to create plot of predicted values
         vs true values. Defaults to True.
+        read_values (bool): Set to True to read predicted and true values from
+                    a .csv file
+        values_file (optional): Name of .csv file to read predicted and true
+                                values from
 
     Returns:
         tuple: (crps_sum, crps)
     """
-    distributions = []  # Probability distributions at future time steps
-    means = []  # Predicted values at future time steps
-    trues = []  # True values at future time steps
-    masks = []
-
-    model.eval()  # Set to evlauation mode
-
-    with torch.no_grad():
-        for _, data in tqdm(enumerate(test_loader), total=len(test_loader)):
-            batch_x, batch_y, batch_x_mark, batch_y_mark = (
-                data[0],
-                data[1],
-                data[2],
-                data[3],
-            )
-
-            seq_trend, seq_seasonal, seq_resid = data[4], data[5], data[6]
-
-            batch_x = batch_x.float().to(device)
-            batch_x_mark = batch_x_mark.float().to(device)
-            batch_y_mark = batch_y_mark.float().to(device)
-            batch_y = batch_y.float()
-
-            seq_trend = seq_trend.float().to(device)
-            seq_seasonal = seq_seasonal.float().to(device)
-            seq_resid = seq_resid.float().to(device)
-
-            # Compute channel-wise predictions
-            for channel in range(batch_x.shape[-1]):
-                # Compute probabilistic forecast
-                probabilistic_forecasts = model.predict_prob(
-                    batch_x[:, -args.seq_len :, channel : channel + 1],
-                    num_samples=args.num_samples,
-                    trend=seq_trend[:, -args.seq_len :, :],
-                    seasonal=seq_seasonal[:, -args.seq_len :, :],
-                    residual=seq_resid[:, -args.seq_len :, :],
-                    pred_len=args.pred_len,
-                )
-
-                # Save probability distributions
-                distribution = probabilistic_forecasts.cpu().numpy()
-                distributions.append(distribution)
-
-                # Get mean at each time step
-                means.append(distribution.mean(axis=0))
-
-                # Save true values
-                trues.append(batch_y[:, :, channel : channel + 1].cpu().numpy())
-
-                # Save masks
-                masks.append(
-                    batch_x_mark[:, -args.pred_len :, channel : channel + 1]
-                    .cpu()
-                    .numpy()
-                )
-            # Empty cache
-            torch.cuda.empty_cache()
-
     batch_index = 0  # Index of which batch will be plotted
     instance_index = 0  # Index of which instance will be plotted
-    if plot:
-        visual(
-            trues[batch_index][instance_index],
-            means[batch_index][instance_index],
-            name="./pics/test_probs.png",
-        )
 
-    trues = np.array(trues)
-    means = np.array(means)
+    if read_values:
+        df = pd.read_csv(f"./results/{values_file}")
+        preds = df["pred"].to_numpy()
+        trues = df["true"].to_numpy()
+        lower_bounds = df["lower"].to_numpy()
+        upper_bounds = df["upper"].to_numpy()
+
+        if plot:
+            visual(
+                trues,
+                preds,
+                lower_bounds=lower_bounds,
+                upper_bounds=upper_bounds,
+                file_name="test_probs.png",
+            )
+
+    else:
+        distributions = []  # Probability distributions at future time steps
+        preds = []  # Predicted values at future time steps
+        trues = []  # True values at future time steps
+        lower_bounds = []
+        upper_bounds = []
+        masks = []
+
+        model.eval()  # Set to evlauation mode
+
+        with torch.no_grad():
+            for _, data in tqdm(enumerate(test_loader), total=len(test_loader)):
+                batch_x, batch_y, batch_x_mark, batch_y_mark = (
+                    data[0],
+                    data[1],
+                    data[2],
+                    data[3],
+                )
+
+                seq_trend, seq_seasonal, seq_resid = data[4], data[5], data[6]
+
+                batch_x = batch_x.float().to(device)
+                batch_x_mark = batch_x_mark.float().to(device)
+                batch_y_mark = batch_y_mark.float().to(device)
+                batch_y = batch_y.float()
+
+                seq_trend = seq_trend.float().to(device)
+                seq_seasonal = seq_seasonal.float().to(device)
+                seq_resid = seq_resid.float().to(device)
+
+                # Compute channel-wise predictions
+                for channel in range(batch_x.shape[-1]):
+                    # Compute probabilistic forecast
+                    probabilistic_forecasts = model.predict_prob(
+                        batch_x[:, -args.seq_len :, channel : channel + 1],
+                        num_samples=args.num_samples,
+                        trend=seq_trend[:, -args.seq_len :, :],
+                        seasonal=seq_seasonal[:, -args.seq_len :, :],
+                        residual=seq_resid[:, -args.seq_len :, :],
+                        pred_len=args.pred_len,
+                    )
+
+                    # Save probability distributions
+                    distribution = probabilistic_forecasts.cpu().numpy()
+                    distributions.append(distribution)
+
+                    # Get mean at each time step
+                    preds.append(distribution.mean(axis=0))
+
+                    # Compute lower bounds and upper bounds for intervals
+                    lower_bounds.append(np.quantile(distribution, 0.025, axis=0))
+                    upper_bounds.append(np.quantile(distribution, 0.975, axis=0))
+
+                    # Save true values
+                    trues.append(batch_y[:, :, channel : channel + 1].cpu().numpy())
+
+                    # Save masks
+                    masks.append(
+                        batch_x_mark[:, -args.pred_len :, channel : channel + 1]
+                        .cpu()
+                        .numpy()
+                    )
+                # Empty cache
+                torch.cuda.empty_cache()
+
+        trues = np.array(trues)
+        preds = np.array(preds)
+        lower_bounds = np.array(lower_bounds)
+        upper_bounds = np.array(upper_bounds)
+
+        # Save predicted and true values to .csv file
+        df = pd.DataFrame(
+            data={
+                "true": trues[batch_index][instance_index].squeeze(),
+                "pred": preds[batch_index][instance_index].squeeze(),
+                "lower": lower_bounds[batch_index][instance_index],
+                "upper": upper_bounds[batch_index][instance_index],
+            }
+        )
+        df.to_csv("./results/values.csv", index=False)
+
+        if plot:
+            visual(
+                trues[batch_index][instance_index],
+                preds[batch_index][instance_index],
+                lower_bounds=lower_bounds,
+                upper_bounds=upper_bounds,
+                file_name="test_probs.png",
+            )
 
     distributions = np.array(distributions)
     masks = np.array(masks)
+
     trues = np.swapaxes(trues.squeeze(), -2, -3)
     unormzalized_gt_data = np.swapaxes(trues.squeeze(), -1, -2)
     masks = np.swapaxes(masks.squeeze(), -2, -3)
