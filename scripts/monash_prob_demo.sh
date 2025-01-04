@@ -78,7 +78,7 @@ python train_eval.py \
     --prompt $prompt\
     --batch_size 256 \
     --learning_rate $lr \
-    --train_epochs 10 \
+    --train_epochs 1 \
     --decay_fac 0.5 \
     --d_model 768 \
     --n_heads 4 \

@@ -542,13 +542,19 @@ def main(args):
         ) = prepare_data_loaders(args, config)
 
         if args.load_trained_model:
-            print("\nLoading trained model...")
+            print("\nloading trained model...")
             model = load_trained_model(args, device, args.loss_func)
         else:
-            print("\rTraining model...")
+            print("\nstarting training procedure...")
             model = train_model(args, device, train_loader, vali_data, vali_loader, i)
 
         print("\n========== Evaluating Model ==========")
+        """
+        If loss function is set to "mse", then (value_1, value_2) will be
+        (average_mae, average_mse).
+        
+        Else, (value_1, value_2) will be (crps_sum, crps) 
+        """
         value_1, value_2 = test(
             model,
             test_loader,
@@ -567,11 +573,11 @@ def main(args):
 
 
 """
-Deterministic forecasting script:
-bash ./scripts/monash.sh
-
 Probabilstic forecasting script:
 bash ./scripts/monash_prob_demo.sh
+
+Deterministic forecasting script:
+bash ./scripts/monash_demo.sh
 """
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -748,7 +754,7 @@ if __name__ == "__main__":
         default=1,
     )
     parser.add_argument(
-        "--model_architecture",
+        "--model",
         type=str,
         choices=["DLinear", "TEMPO", "T5", "ETSformer"],
         default="TEMPO",
