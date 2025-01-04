@@ -846,8 +846,6 @@ def test_probs(
     )
     df.to_csv(results_file_path, index=False)
 
-    print(lower_bounds.shape)
-
     if plot:
         visual(
             trues[batch_index][instance_index],
