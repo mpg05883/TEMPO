@@ -533,9 +533,9 @@ def main(args):
 
         # Load training, validation, and test sets
         (
-            _,
+            _,  # training set
             train_loader,
-            test_data,
+            _,  # test set
             test_loader,
             vali_data,
             vali_loader,
@@ -549,24 +549,16 @@ def main(args):
             model = train_model(args, device, train_loader, vali_data, vali_loader, i)
 
         print("\n========== Evaluating Model ==========")
+        value_1, value_2 = test(
+            model, test_loader, args, device, i, read_values=args.read_values
+        )
+
         if args.loss_func == "mse":
-            # TODO: figure out why test uses i
-            average_mae, average_mse = test(
-                model, test_data, test_loader, args, device, i
-            )
-            print(f"Average MAE: {average_mae:.4f}")
-            print(f"Average MSE: {average_mse:.4f}")
+            print(f"Average MAE: {value_1:.4f}")
+            print(f"Average MSE: {value_2:.4f}")
         else:
-            crps_sum, crps = test_probs(
-                model,
-                test_loader,
-                args,
-                device,
-                read_values=args.read_values,
-                values_file=args.values_file,
-            )
-            print(f"CRPS Sum: {crps_sum:.4f}")
-            print(f"CRPS: {crps:.4f}")
+            print(f"CRPS Sum: {value_1:.4f}")
+            print(f"CRPS: {value_2:.4f}")
 
 
 """
@@ -587,6 +579,7 @@ if __name__ == "__main__":
         default="weather_GTP4TS_multi-debug",
     )
 
+    # Name of checkpoints directory
     checkpoints_dir = "checkpoints"
 
     # Create checkpoints directory if it doesn't exist
@@ -596,7 +589,7 @@ if __name__ == "__main__":
     # Create default directory to save model
     checkpoint = "default"
 
-    # Create path to defaullt directory where model will be saved
+    # Create path to default directory
     checkpoints_path = os.path.join(checkpoints_dir, checkpoint)
 
     parser.add_argument(
@@ -754,7 +747,7 @@ if __name__ == "__main__":
         type=str,
         choices=["DLinear", "TEMPO", "T5", "ETSformer"],
         default="TEMPO",
-        help="Model architecture",
+        help="Type of model that'll be trained and evaluated",
     )
     parser.add_argument(
         "--stride",
@@ -781,7 +774,7 @@ if __name__ == "__main__":
         "--itr",
         type=int,
         default=1,
-        help="Number of iterations to run training and inference loop",
+        help="Number of iterations to run training and evaluation loop",
     )
     parser.add_argument(
         "--cos",
@@ -877,20 +870,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--load_trained_model",
         type=bool,
-        default=True,
-        help="Set to True load trained model",
+        default=False,
+        help="Set to True to load trained model",
     )
     parser.add_argument(
         "--read_values",
         type=bool,
-        default=True,
+        default=False,
         help="Set to True to read predicted and true values from a .csv file",
-    )
-    parser.add_argument(
-        "--values_file",
-        type=str,
-        default="values.csv",
-        help="Name of .csv file where predicted and true will be read from",
     )
 
     args = parser.parse_args()

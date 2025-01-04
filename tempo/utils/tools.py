@@ -516,65 +516,95 @@ def metric_mae_mse(preds, trues):
     return mae, mse
 
 
-# TODO: add flag that calls test_probs if set to true
 def test(
     model,
-    test_data,
     test_loader,
     args,
     device,
-    itr,
+    iteration,
     plot=True,
     read_values=False,
-    values_file=None,
+    values_file="det_values.csv",
 ):
     """
     Evaluates the quality of a given model's deterministic forecasts by
-    computing the average NAE and average MSE pf the true values and the
-    predicted values for each future time step
+    computing the average MAE and MSE of the true values and predicted values
+    for each future time step. Calls test_probs() if loss function isn't mse
 
     Args:
         model: Model that'll be computing the probabilistic forecasts
-        test_data: Test dataset
-        test_loader: Dataloader for the test dataset
+        test_loader: Dataloader for test set
         args: Command line arguments
-        device: Device to run the model on
-        plot (bool): Set to True to create plot of predicted values
-        vs true values. Defaults to True.
+        device: Device to run model on
+        iteration: Iteration number of training and inference loop
+        plot (bool): Set to True to create plot of predicted values vs true
+        values. Defaults to True.
         read_values (bool): Set to True to read predicted and true values from
-                    a .csv file
+                    a .csv file. Defaults to False.
         values_file (optional): Name of .csv file to read predicted and true
                                 values from
 
     Returns:
-        tuple: (crps_sum, crps)
+        tuple: (average_mae, average_mse) if loss function is mse. Else,
+               returns (crps_sum, crps)
     """
-    # Initialize accumulators for errors
+    if args.loss_func != "mse":
+        return test_probs(
+            model,
+            test_loader,
+            args,
+            device,
+            plot=plot,
+            read_values=read_values,
+        )
+
+    results_file_path = f"./results/{values_file}"
+    if read_values:
+        # Load values from .csv file
+        df = pd.read_csv(results_file_path)
+        y_pred = df["pred"].to_numpy()
+        y_true = df["true"].to_numpy()
+
+        # Create plot
+        visual(
+            y_pred,
+            y_true,
+            file_name="test_det.png",
+        )
+
+    preds = []
+    trues = []
     total_mae = 0
     total_mse = 0
     num_samples = 0
 
-    model.eval()
+    model.eval()  # Set to evlauation mode
+
     with torch.no_grad():
         for _, data in tqdm(enumerate(test_loader), total=len(test_loader)):
-            (
-                batch_x,
-                batch_y,
-                batch_x_mark,
-                batch_y_mark,
-                seq_trend,
-                seq_seasonal,
-                seq_resid,
-            ) = (data[0], data[1], data[2], data[3], data[4], data[5], data[6])
+            batch_x, batch_y, batch_x_mark, batch_y_mark = (
+                data[0],  # Input time series
+                data[1],  # Future time series
+                data[2],
+                data[3],
+            )
+
+            seq_trend, seq_seasonal, seq_resid = (
+                data[4],  # Trend component
+                data[5],  # Seasonal component
+                data[6],  # Residual component
+            )
 
             batch_x = batch_x.float().to(device)
+            batch_x_mark = batch_x_mark.float().to(device)
+            batch_y_mark = batch_y_mark.float().to(device)
+            batch_y = batch_y.float()
+
             seq_trend = seq_trend.float().to(device)
             seq_seasonal = seq_seasonal.float().to(device)
             seq_resid = seq_resid.float().to(device)
-            batch_x_mark = batch_x_mark.float().to(device)
-            batch_y_mark = batch_y_mark.float().to(device)
 
-            batch_y = batch_y.float()
+            # Compute forward pass
             if (
                 args.model == "TEMPO"
                 or args.model == "TEMPO_t5"
@@ -582,7 +612,7 @@ def test(
             ):
                 outputs, _ = model(
                     batch_x[:, -args.seq_len :, :],
-                    itr,
+                    iteration,
                     seq_trend[:, -args.seq_len :, :],
                     seq_seasonal[:, -args.seq_len :, :],
                     seq_resid[:, -args.seq_len :, :],
@@ -594,45 +624,64 @@ def test(
                 or args.model == "LightTS"
             ):
                 dec_inp = torch.zeros_like(batch_y[:, -args.pred_len :, :]).float()
+
                 dec_inp = (
                     torch.cat([batch_y[:, : args.label_len, :], dec_inp], dim=1)
                     .float()
                     .to(device)
                 )
+
                 outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
             else:
-                outputs = model(batch_x[:, -args.seq_len :, :], itr)
+                outputs = model(batch_x[:, -args.seq_len :, :], iteration)
 
-            # outputs = model(batch_x[:, -args.seq_len:, :], itr)
-
-            # encoder - decoder
             outputs = outputs[:, -args.pred_len :, :]
             batch_y = batch_y[:, -args.pred_len :, :].to(device)
 
+            # Save predicted values
             pred = outputs.detach().cpu().numpy().astype(np.float16)
+            preds.append(pred)
+
+            # Save true values
             true = batch_y.detach().cpu().numpy().astype(np.float16)
+            trues.append(true)
+
             torch.cuda.empty_cache()
 
-            # Calculate the batch errors
+            # Calculate batch errors
             batch_mae, batch_mse = metric_mae_mse(pred, true)
 
-            # Update the total errors
-            total_mae += batch_mae * batch_x.size(
-                0
-            )  # Assuming batch_x.size(0) is the batch size
+            # Update the total errors (assuming batch_x.size(0) is batch size)
+            total_mae += batch_mae * batch_x.size(0)
             total_mse += batch_mse * batch_x.size(0)
             num_samples += batch_x.size(0)
 
             torch.cuda.empty_cache()
 
-            # preds.append(pred)
-            # trues.append(true)
+    batch_index = 0  # Index of which batch will be saved to .csv file
+    instance_index = 0  # Index of which instance will be saved to .csv file
 
-    # Calculate the average errors
-    mae = total_mae / num_samples
-    mse = total_mse / num_samples
+    # Save predicted and true values to .csv file
+    df = pd.DataFrame(
+        data={
+            "true": trues[batch_index][instance_index].squeeze(),
+            "pred": preds[batch_index][instance_index].squeeze(),
+        }
+    )
+    df.to_csv(results_file_path, index=False)
 
-    return mse, mae
+    if plot:
+        visual(
+            trues[batch_index][instance_index],
+            preds[batch_index][instance_index],
+            file_name="test_det.png",
+        )
+
+    # Calculate average errors
+    average_mae = total_mae / num_samples
+    average_mse = total_mse / num_samples
+
+    return average_mae, average_mse
 
 
 def sample_negative_binomial(mu, alpha, num_samples=1):
@@ -670,6 +719,7 @@ def test_probs(
     args,
     device,
     plot=True,
+    read_values=False,
     values_file="prob_values.csv",
 ):
     """
@@ -693,9 +743,10 @@ def test_probs(
     Returns:
         tuple: (crps_sum, crps)
     """
-    if plot:
+    results_file_path = f"./results/{values_file}"
+    if read_values:
         # Load values from .csv file
-        df = pd.read_csv(f"./results/{values_file}")
+        df = pd.read_csv(results_file_path)
         y_pred = df["pred"].to_numpy()
         y_true = df["true"].to_numpy()
         lower_bounds = df["lower"].to_numpy()
@@ -776,7 +827,6 @@ def test_probs(
                     .numpy()
                 )
 
-            # Empty cache
             torch.cuda.empty_cache()
 
     trues = np.array(trues)
@@ -796,7 +846,7 @@ def test_probs(
             "upper": upper_bounds[batch_index][instance_index],
         }
     )
-    df.to_csv("./results/prob_values.csv", index=False)
+    df.to_csv(results_file_path, index=False)
 
     if plot:
         visual(
