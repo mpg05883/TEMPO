@@ -508,6 +508,7 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
     return model
 
 
+# TODO: once you finish merging det and prob scripts, ask Defu what notebook he used to start parallelizing the training script
 def main(args):
     # Load configuration
     config = get_init_config(args.config_path)
