@@ -574,6 +574,8 @@ def main(args):
             print(f"CRPS Sum: {value_1:.4f}")
             print(f"CRPS: {value_2:.4f}")
 
+    print("Finished!")
+
 
 """
 Probabilstic forecasting script:
