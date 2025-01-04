@@ -541,10 +541,10 @@ def main(args):
         ) = prepare_data_loaders(args, config)
 
         if args.load_trained_model:
-            print("\nloading trained model...")
+            print("\nLoading trained model...")
             model = load_trained_model(args, device, args.loss_func)
         else:
-            print("\nstarting training procedure...")
+            print("\nStarting training procedure...")
             model = train_model(args, device, train_loader, vali_data, vali_loader, i)
 
         print("\n========== Evaluating Model ==========")
