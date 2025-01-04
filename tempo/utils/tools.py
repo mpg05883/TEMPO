@@ -885,5 +885,3 @@ def test_probs(
     )
 
     return crps_sum, crps
-    return crps_sum, crps
-    return crps_sum, crps
