@@ -525,10 +525,11 @@ def main(args):
     for i in range(args.itr):
         print(f"\n========== Iteration {i + 1}/{args.itr} ==========")
 
+        # Get data loaders for training, validation, and test sets
         (
-            _,  # training set
+            _,  # train_data
             train_loader,
-            _,  # test set
+            _,  # test_data
             test_loader,
             vali_data,
             vali_loader,
