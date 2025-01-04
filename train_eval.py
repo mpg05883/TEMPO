@@ -531,7 +531,6 @@ def main(args):
     for i in range(args.itr):
         print(f"\n========== Iteration {i + 1}/{args.itr} ==========")
 
-        # Load training, validation, and test sets
         (
             _,  # training set
             train_loader,
