@@ -230,7 +230,7 @@ def visual(
                 y2=upper_bounds,
                 color="orange",
                 alpha=0.2,
-                label=f"Prediction Interval ({confidence_level}%)",
+                label=f"Prediction Interval ({confidence_level}% confidence)",
             )
 
     plt.xlabel("time")
