@@ -744,6 +744,8 @@ def test_probs(
         tuple: (crps_sum, crps)
     """
     results_file_path = f"./results/{values_file}"
+    plot_file_name = "test_probs.png"
+
     if read_values:
         # Load values from .csv file
         df = pd.read_csv(results_file_path)
@@ -754,7 +756,7 @@ def test_probs(
             df["true"].to_numpy(),
             lower_bounds=df["lower"].to_numpy(),
             upper_bounds=df["upper"].to_numpy(),
-            file_name="test_probs.png",
+            file_name=plot_file_name,
         )
 
     distributions = []  # Probability distributions at future time steps
@@ -852,7 +854,7 @@ def test_probs(
             preds[batch_index][instance_index],
             lower_bounds=lower_bounds[batch_index][instance_index],
             upper_bounds=upper_bounds[batch_index][instance_index],
-            file_name="test_probs.png",
+            file_name=plot_file_name,
         )
 
     distributions = np.array(distributions)
