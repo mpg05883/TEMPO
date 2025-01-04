@@ -550,7 +550,12 @@ def main(args):
 
         print("\n========== Evaluating Model ==========")
         value_1, value_2 = test(
-            model, test_loader, args, device, i, read_values=args.read_values
+            model,
+            test_loader,
+            args,
+            device,
+            i,
+            read_values=args.read_values,
         )
 
         if args.loss_func == "mse":

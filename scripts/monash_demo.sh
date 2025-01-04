@@ -9,8 +9,8 @@
 #SBATCH -p gpu                      # Use the gpu partition
 #SBATCH --time=12:00:00             # Specify the time needed for your experiment
 #SBATCH --qos=gpu-8                 # To enable the use of up to 8 GPUs
-# use the following to remove \r: sed -i 's/\r//g' monash_prob_demo.sh 
-export CUDA_VISIBLE_DEVICES=4
+# 
+# export CUDA_VISIBLE_DEVICES=2
 
 seq_len=336
 model=TEMPO #TEMPO #PatchTST #_multi
@@ -40,7 +40,7 @@ else
     echo "Directory $dir1 already exists."
 fi
 
-dir2="logs/$model/Prob_ReVIN_${prompt}_prompt_equal_${equal}"
+dir2="logs/$model/ReVIN_${prompt}_prompt_equal_${equal}"
 if [ ! -d "$dir2" ]; then
     mkdir -p "$dir2"
     echo "Directory $dir2 has been created."
@@ -59,17 +59,15 @@ fi
 log_path="${dir3}/test_${seq_len}_${pred_len}_lr${lr}.log"
 echo -e "$log_path"
 
-# python train_eval.py \
-# MASTER_PORT=29503 torchrun --nproc_per_node=2 train_TEMPO_prob_parallel.py \
 python train_eval.py \
-    --datasets ETTh2 \
+    --datasets monash \
     --eval_data ETTm1 \
     --target_data ETTh2 \
     --config_path ./configs/multiple_datasets.yml \
     --stl_weight 0.001 \
     --equal $equal \
     --checkpoint ./checkpoints/Monash'_'$prompt/ \
-    --model_id Demo_Monash_TEMPO_Prob'_'$gpt_layer'_'prompt_learn'_'$seq_len'_'$pred_len'_'$percent \
+    --model_id Monash_TEMPO'_'$gpt_layer'_'prompt_learn'_'$seq_len'_'$pred_len'_'$percent \
     --electri_multiplier $electri_multiplier \
     --traffic_multiplier $traffic_multiplier \
     --seq_len $seq_len \
@@ -89,13 +87,11 @@ python train_eval.py \
     --patch_size 16 \
     --stride 8 \
     --gpt_layer $gpt_layer \
-    --itr 1 \
+    --itr 3 \
     --model $model \
     --tmax $tmax \
     --cos 1 \
-    --is_gpt 1 \
-    --loss_func prob
-    #>> logs/$model/Prob_ReVIN_$prompt'_'prompt'_'equal'_'$equal/Monash_$model'_'$gpt_layer/test'_'$seq_len'_'$pred_len'_lr'$lr.log
+    --is_gpt 1 #>> logs/$model/ReVIN_$prompt'_'prompt'_'equal'_'$equal/Monash_$model'_'$gpt_layer/test'_'$seq_len'_'$pred_len'_lr'$lr.log
 
 
 done

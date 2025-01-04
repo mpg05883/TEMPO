@@ -529,7 +529,7 @@ def test(
     """
     Evaluates the quality of a given model's deterministic forecasts by
     computing the average MAE and MSE of the true values and predicted values
-    for each future time step. Calls test_probs() if loss function isn't mse
+    for each future time step. Calls test_probs() if loss function is not "mse"
 
     Args:
         model: Model that'll be computing the probabilistic forecasts
