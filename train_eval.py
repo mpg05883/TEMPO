@@ -459,7 +459,7 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
 
             train_loss.append(loss.item())
 
-            # Print an update every 1000 batches
+            # Print update every 1000 batches
             if (i + 1) % 1000 == 0:
                 print_batch_update(
                     i,
