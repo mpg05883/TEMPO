@@ -60,7 +60,7 @@ log_path="${dir3}/test_${seq_len}_${pred_len}_lr${lr}.log"
 echo -e "$log_path"
 
 python train_eval.py \
-    --datasets monash \
+    --datasets ETTh2 \
     --eval_data ETTm1 \
     --target_data ETTh2 \
     --config_path ./configs/multiple_datasets.yml \
@@ -87,7 +87,7 @@ python train_eval.py \
     --patch_size 16 \
     --stride 8 \
     --gpt_layer $gpt_layer \
-    --itr 3 \
+    --itr 1 \
     --model $model \
     --tmax $tmax \
     --cos 1 \

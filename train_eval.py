@@ -73,7 +73,7 @@ def get_settings(args, itr, seq_len=336):
 
 
 def print_dataset_info(data, loader, name="Dataset"):
-    print(f"\n=== {name} Information ===")
+    print(f"\n========== {name} Info ==========")
     print(f"Number of samples: {len(data):,}")
     print(f"Batch size: {loader.batch_size}")
     print(f"Number of batches: {len(loader)}")
@@ -521,7 +521,7 @@ def main(args):
 
     # Set device to run model on
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Model will run on {device}")
+    print(f"\nModel will run on {device}")
 
     for i in range(args.itr):
         print(f"\n========== Iteration {i + 1}/{args.itr} ==========")
