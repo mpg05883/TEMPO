@@ -733,8 +733,8 @@ def test_probs(
         test_loader: Dataloader for the test dataset
         args: Command line arguments
         device: Device to run the model on
-        plot (bool): Set to True to create plot of predicted values
-        vs true values. Defaults to True.
+        plot (bool): Set to True to create plot of predicted values vs true
+        values. Defaults to True.
         read_values (bool): Set to True to read predicted and true values from
                     a .csv file
         values_file (optional): Name of .csv file to read predicted and true
