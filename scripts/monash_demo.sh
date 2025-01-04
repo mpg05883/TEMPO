@@ -67,7 +67,7 @@ python train_eval.py \
     --stl_weight 0.001 \
     --equal $equal \
     --checkpoint ./checkpoints/Monash'_'$prompt/ \
-    --model_id Monash_TEMPO'_'$gpt_layer'_'prompt_learn'_'$seq_len'_'$pred_len'_'$percent \
+    --model_id Demo_Monash_TEMPO'_'$gpt_layer'_'prompt_learn'_'$seq_len'_'$pred_len'_'$percent \
     --electri_multiplier $electri_multiplier \
     --traffic_multiplier $traffic_multiplier \
     --seq_len $seq_len \

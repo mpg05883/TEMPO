@@ -280,17 +280,15 @@ def print_batch_update(
     )
 
 
-def load_trained_model(args, device: str, loss_func="mse"):
+def get_checkpoint(loss_func: str):
     """
-    Initializes TEMPO model and loads trained model's parameters
+    Returns file path to a trained model's checkpoint
 
     Args:
         loss_func: Loss function that trained model optimized. Determines
-                   if deterministic or probabilistic model is loaded
+                   if deterministic or probabilistic checkpoint is returned
     """
-    # Initialize TEMPO model
-    model = TEMPO(args, device)
-
+    # Checkpoints directory
     checkpoints_dir = "checkpoints"
 
     # Directory path to checkpoints
@@ -300,7 +298,7 @@ def load_trained_model(args, device: str, loss_func="mse"):
         # Get deterministic model
         checkpoint = os.path.join(
             checkpoint,
-            "Demo_Monash_TEMPO_Prob_6_prompt_learn_336_96_100_sl336_ll0_pl96_dm768_nh4_el3_gl6_df768_ebtimeF_itr0",
+            "Demo_Monash_TEMPO_6_prompt_learn_336_96_100_sl336_ll0_pl96_dm768_nh4_el3_gl6_df768_ebtimeF_itr0",
         )
     else:
         # Get probabilstic model
@@ -310,10 +308,9 @@ def load_trained_model(args, device: str, loss_func="mse"):
         )
 
     # File path to checkpoint
-    checkpoint = os.path.join(checkpoint, "checkpoint.pth")
+    checkpoint_file_path = os.path.join(checkpoint, "checkpoint.pth")
 
-    # Load trained model's parameters
-    return model.load_state_dict(torch.load(checkpoint), strict=False)
+    return checkpoint_file_path
 
 
 def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
@@ -536,9 +533,20 @@ def main(args):
             vali_loader,
         ) = prepare_data_loaders(args, config)
 
-        if args.load_trained_model:
-            print("\nLoading trained model...")
-            model = load_trained_model(args, device, args.loss_func)
+        if args.get_checkpoint:
+            # Initialize TEMPO model
+            model = TEMPO(args, device)
+
+            # Get trained model's checkpoint
+            checkpoint_file_path = get_checkpoint(args.loss_func)
+
+            print(f"\nLoading trained model from {checkpoint_file_path}...")
+
+            # Load trained model's parameters
+            model.load_state_dict(
+                torch.load(checkpoint_file_path),
+                strict=False,
+            )
         else:
             print("\nStarting training procedure...")
             model = train_model(args, device, train_loader, vali_data, vali_loader, i)
@@ -874,15 +882,15 @@ if __name__ == "__main__":
         help="Set to True to print command line arguments and configuration",
     )
     parser.add_argument(
-        "--load_trained_model",
+        "--get_checkpoint",
         type=bool,
-        default=False,
+        default=True,
         help="Set to True to load trained model",
     )
     parser.add_argument(
         "--read_values",
         type=bool,
-        default=False,
+        default=True,
         help="Set to True to read predicted and true values from a .csv file",
     )
 

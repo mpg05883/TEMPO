@@ -1,11 +1,13 @@
 # Third-party library imports
 import numpy as np
 import torch
-from numpy.random import choice
-from utils.tools import load_data_from_huggingface
 
 # Local imports
 from tempo.models.TEMPO import TEMPO
+
+# from numpy.random import choice
+# from utils.tools import load_data_from_huggingface
+
 
 model = TEMPO.load_pretrained_model(
     device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
