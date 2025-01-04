@@ -190,7 +190,7 @@ class StandardScaler:
 
 
 def visual(
-    true,
+    trues,
     preds=None,
     lower_bounds=None,
     upper_bounds=None,
@@ -202,7 +202,7 @@ def visual(
     Plots predicted values if they're given.
 
     Args:
-        true: List of true values
+        trues: List of true values
         preds (optional): List of predicted values. Defaults to None.
         pred_interval (bool, optional): Set to true to plot prediction
                                         interval with 95% confidence interval.
@@ -212,14 +212,14 @@ def visual(
     """
 
     # If 'plots' directory doesn't exist, then create it
-    directory = "./plots"
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+    plots_dir = "plots"
+    if not os.path.exists(plots_dir):
+        os.makedirs(plots_dir)
 
     # Create plot
     plt.figure()
     plt.title("Ground Truth vs Predicted Values")
-    plt.plot(true, label="Ground Truth", linewidth=2)
+    plt.plot(trues, label="Ground Truth", linewidth=2)
     if preds is not None:
         plt.plot(preds, label="Predicted", linewidth=2)
 
@@ -232,8 +232,14 @@ def visual(
                 alpha=0.2,
                 label=f"Prediction Interval ({confidence_level}%)",
             )
+
+    plt.xlabel("time")
+    plt.ylabel("y")
     plt.legend()
-    plt.savefig(os.path.join(directory, file_name), bbox_inches="tight")
+
+    # Save plot
+    file_path = os.path.join(plots_dir, file_name)
+    plt.savefig(file_path, bbox_inches="tight")
 
 
 def convert_tsf_to_dataframe(
@@ -510,20 +516,47 @@ def metric_mae_mse(preds, trues):
     return mae, mse
 
 
-def test(model, test_data, test_loader, args, device, itr):
-    preds = []
-    trues = []
-    # mases = []
+# TODO: add flag that calls test_probs if set to true
+def test(
+    model,
+    test_data,
+    test_loader,
+    args,
+    device,
+    itr,
+    plot=True,
+    read_values=False,
+    values_file=None,
+):
+    """
+    Evaluates the quality of a given model's deterministic forecasts by
+    computing the average NAE and average MSE pf the true values and the
+    predicted values for each future time step
 
+    Args:
+        model: Model that'll be computing the probabilistic forecasts
+        test_data: Test dataset
+        test_loader: Dataloader for the test dataset
+        args: Command line arguments
+        device: Device to run the model on
+        plot (bool): Set to True to create plot of predicted values
+        vs true values. Defaults to True.
+        read_values (bool): Set to True to read predicted and true values from
+                    a .csv file
+        values_file (optional): Name of .csv file to read predicted and true
+                                values from
+
+    Returns:
+        tuple: (crps_sum, crps)
+    """
     # Initialize accumulators for errors
     total_mae = 0
     total_mse = 0
-    n_samples = 0
+    num_samples = 0
 
     model.eval()
     with torch.no_grad():
-        for i, data in tqdm(enumerate(test_loader), total=len(test_loader)):
-
+        for _, data in tqdm(enumerate(test_loader), total=len(test_loader)):
             (
                 batch_x,
                 batch_y,
@@ -533,11 +566,6 @@ def test(model, test_data, test_loader, args, device, itr):
                 seq_seasonal,
                 seq_resid,
             ) = (data[0], data[1], data[2], data[3], data[4], data[5], data[6])
-
-            # outputs_np = batch_x.cpu().numpy()
-            # np.save("emb_test/ETTh2_192_test_input_itr{}_{}.npy".format(itr, i), outputs_np)
-            # outputs_np = batch_y.cpu().numpy()
-            # np.save("emb_test/ETTh2_192_test_true_itr{}_{}.npy".format(itr, i), outputs_np)
 
             batch_x = batch_x.float().to(device)
             seq_trend = seq_trend.float().to(device)
@@ -593,7 +621,7 @@ def test(model, test_data, test_loader, args, device, itr):
                 0
             )  # Assuming batch_x.size(0) is the batch size
             total_mse += batch_mse * batch_x.size(0)
-            n_samples += batch_x.size(0)
+            num_samples += batch_x.size(0)
 
             torch.cuda.empty_cache()
 
@@ -601,11 +629,8 @@ def test(model, test_data, test_loader, args, device, itr):
             # trues.append(true)
 
     # Calculate the average errors
-    mae = total_mae / n_samples
-    mse = total_mse / n_samples
-
-    print(f"Average MAE: {mae}")
-    print(f"Average MSE: {mse}")
+    mae = total_mae / num_samples
+    mse = total_mse / num_samples
 
     return mse, mae
 
@@ -641,13 +666,11 @@ def sample_negative_binomial(mu, alpha, num_samples=1):
 
 def test_probs(
     model,
-    test_data,
     test_loader,
     args,
     device,
     plot=True,
-    read_values=False,
-    values_file=None,
+    values_file="prob_values.csv",
 ):
     """
     Evaluates the quality of a given model's proabilistic forecasts by
@@ -670,114 +693,119 @@ def test_probs(
     Returns:
         tuple: (crps_sum, crps)
     """
-    batch_index = 0  # Index of which batch will be plotted
-    instance_index = 0  # Index of which instance will be plotted
-
-    if read_values:
+    if plot:
+        # Load values from .csv file
         df = pd.read_csv(f"./results/{values_file}")
-        preds = df["pred"].to_numpy()
-        trues = df["true"].to_numpy()
+        y_pred = df["pred"].to_numpy()
+        y_true = df["true"].to_numpy()
         lower_bounds = df["lower"].to_numpy()
         upper_bounds = df["upper"].to_numpy()
 
-        if plot:
-            visual(
-                trues,
-                preds,
-                lower_bounds=lower_bounds,
-                upper_bounds=upper_bounds,
-                file_name="test_probs.png",
+        # Create plot
+        visual(
+            y_pred,
+            y_true,
+            lower_bounds=lower_bounds,
+            upper_bounds=upper_bounds,
+            file_name="test_probs.png",
+        )
+
+    distributions = []  # Probability distributions at future time steps
+    preds = []  # Predicted values at future time steps
+    trues = []  # True values at future time steps
+    lower_bounds = []
+    upper_bounds = []
+    masks = []
+
+    model.eval()  # Set to evlauation mode
+
+    with torch.no_grad():
+        for _, data in tqdm(enumerate(test_loader), total=len(test_loader)):
+            batch_x, batch_y, batch_x_mark, batch_y_mark = (
+                data[0],  # Input time series
+                data[1],  # Future time series
+                data[2],
+                data[3],
             )
 
-    else:
-        distributions = []  # Probability distributions at future time steps
-        preds = []  # Predicted values at future time steps
-        trues = []  # True values at future time steps
-        lower_bounds = []
-        upper_bounds = []
-        masks = []
+            seq_trend, seq_seasonal, seq_resid = (
+                data[4],  # Trend component
+                data[5],  # Seasonal component
+                data[6],  # Residual component
+            )
 
-        model.eval()  # Set to evlauation mode
+            batch_x = batch_x.float().to(device)
+            batch_x_mark = batch_x_mark.float().to(device)
+            batch_y_mark = batch_y_mark.float().to(device)
+            batch_y = batch_y.float()
 
-        with torch.no_grad():
-            for _, data in tqdm(enumerate(test_loader), total=len(test_loader)):
-                batch_x, batch_y, batch_x_mark, batch_y_mark = (
-                    data[0],
-                    data[1],
-                    data[2],
-                    data[3],
+            seq_trend = seq_trend.float().to(device)
+            seq_seasonal = seq_seasonal.float().to(device)
+            seq_resid = seq_resid.float().to(device)
+
+            # Compute channel-wise predictions
+            for channel in range(batch_x.shape[-1]):
+                # Compute probabilistic forecast
+                probabilistic_forecasts = model.predict_prob(
+                    batch_x[:, -args.seq_len :, channel : channel + 1],
+                    num_samples=args.num_samples,
+                    trend=seq_trend[:, -args.seq_len :, :],
+                    seasonal=seq_seasonal[:, -args.seq_len :, :],
+                    residual=seq_resid[:, -args.seq_len :, :],
+                    pred_len=args.pred_len,
                 )
 
-                seq_trend, seq_seasonal, seq_resid = data[4], data[5], data[6]
+                # Save probability distributions
+                distribution = probabilistic_forecasts.cpu().numpy()
+                distributions.append(distribution)
 
-                batch_x = batch_x.float().to(device)
-                batch_x_mark = batch_x_mark.float().to(device)
-                batch_y_mark = batch_y_mark.float().to(device)
-                batch_y = batch_y.float()
+                # Get mean at each time step
+                preds.append(distribution.mean(axis=0))
 
-                seq_trend = seq_trend.float().to(device)
-                seq_seasonal = seq_seasonal.float().to(device)
-                seq_resid = seq_resid.float().to(device)
+                # Compute lower bounds and upper bounds for intervals
+                lower_bounds.append(np.quantile(distribution, 0.025, axis=0))
+                upper_bounds.append(np.quantile(distribution, 0.975, axis=0))
 
-                # Compute channel-wise predictions
-                for channel in range(batch_x.shape[-1]):
-                    # Compute probabilistic forecast
-                    probabilistic_forecasts = model.predict_prob(
-                        batch_x[:, -args.seq_len :, channel : channel + 1],
-                        num_samples=args.num_samples,
-                        trend=seq_trend[:, -args.seq_len :, :],
-                        seasonal=seq_seasonal[:, -args.seq_len :, :],
-                        residual=seq_resid[:, -args.seq_len :, :],
-                        pred_len=args.pred_len,
-                    )
+                # Save true values
+                trues.append(batch_y[:, :, channel : channel + 1].cpu().numpy())
 
-                    # Save probability distributions
-                    distribution = probabilistic_forecasts.cpu().numpy()
-                    distributions.append(distribution)
+                # Save masks
+                masks.append(
+                    batch_x_mark[:, -args.pred_len :, channel : channel + 1]
+                    .cpu()
+                    .numpy()
+                )
 
-                    # Get mean at each time step
-                    preds.append(distribution.mean(axis=0))
+            # Empty cache
+            torch.cuda.empty_cache()
 
-                    # Compute lower bounds and upper bounds for intervals
-                    lower_bounds.append(np.quantile(distribution, 0.025, axis=0))
-                    upper_bounds.append(np.quantile(distribution, 0.975, axis=0))
+    trues = np.array(trues)
+    preds = np.array(preds)
+    lower_bounds = np.array(lower_bounds)
+    upper_bounds = np.array(upper_bounds)
 
-                    # Save true values
-                    trues.append(batch_y[:, :, channel : channel + 1].cpu().numpy())
+    batch_index = 0  # Index of which batch will be plotted
+    instance_index = 0  # Index of which instance will be plotted
 
-                    # Save masks
-                    masks.append(
-                        batch_x_mark[:, -args.pred_len :, channel : channel + 1]
-                        .cpu()
-                        .numpy()
-                    )
-                # Empty cache
-                torch.cuda.empty_cache()
+    # Save predicted and true values to .csv file
+    df = pd.DataFrame(
+        data={
+            "true": trues[batch_index][instance_index].squeeze(),
+            "pred": preds[batch_index][instance_index].squeeze(),
+            "lower": lower_bounds[batch_index][instance_index],
+            "upper": upper_bounds[batch_index][instance_index],
+        }
+    )
+    df.to_csv("./results/prob_values.csv", index=False)
 
-        trues = np.array(trues)
-        preds = np.array(preds)
-        lower_bounds = np.array(lower_bounds)
-        upper_bounds = np.array(upper_bounds)
-
-        # Save predicted and true values to .csv file
-        df = pd.DataFrame(
-            data={
-                "true": trues[batch_index][instance_index].squeeze(),
-                "pred": preds[batch_index][instance_index].squeeze(),
-                "lower": lower_bounds[batch_index][instance_index],
-                "upper": upper_bounds[batch_index][instance_index],
-            }
+    if plot:
+        visual(
+            trues[batch_index][instance_index],
+            preds[batch_index][instance_index],
+            lower_bounds=lower_bounds,
+            upper_bounds=upper_bounds,
+            file_name="test_probs.png",
         )
-        df.to_csv("./results/values.csv", index=False)
-
-        if plot:
-            visual(
-                trues[batch_index][instance_index],
-                preds[batch_index][instance_index],
-                lower_bounds=lower_bounds,
-                upper_bounds=upper_bounds,
-                file_name="test_probs.png",
-            )
 
     distributions = np.array(distributions)
     masks = np.array(masks)
