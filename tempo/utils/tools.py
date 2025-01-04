@@ -2,30 +2,30 @@ import logging
 import os
 from datetime import datetime
 from distutils.util import strtobool
+from io import StringIO
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-import torch.distributions as dist
-import torch.nn as nn
+from huggingface_hub import hf_hub_download
+
+# import torch.nn as nn
 from torch.distributions import NegativeBinomial
 from tqdm import tqdm
 
-from tempo.utils.imputation_metrics import (
+from tempo.utils.imputation_metrics import (  # mae_withmask,; mse_withmask,
     calc_quantile_CRPS,
     calc_quantile_CRPS_sum,
-    mae_withmask,
-    mse_withmask,
 )
-from tempo.utils.metrics import metric
+
+# import torch.distributions as dist
+
+
+# from tempo.utils.metrics import metric
 
 plt.switch_backend("agg")
 
-
-from io import StringIO
-
-from huggingface_hub import hf_hub_download
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s: %(message)s", datefmt="%m/%d/%Y %I:%M:%S%p"
@@ -747,17 +747,13 @@ def test_probs(
     if read_values:
         # Load values from .csv file
         df = pd.read_csv(results_file_path)
-        y_pred = df["pred"].to_numpy()
-        y_true = df["true"].to_numpy()
-        lower_bounds = df["lower"].to_numpy()
-        upper_bounds = df["upper"].to_numpy()
 
         # Create plot
         visual(
-            y_pred,
-            y_true,
-            lower_bounds=lower_bounds,
-            upper_bounds=upper_bounds,
+            df["pred"].to_numpy(),
+            df["true"].to_numpy(),
+            lower_bounds=df["lower"].to_numpy(),
+            upper_bounds=df["upper"].to_numpy(),
             file_name="test_probs.png",
         )
 
@@ -848,12 +844,14 @@ def test_probs(
     )
     df.to_csv(results_file_path, index=False)
 
+    print(lower_bounds.shape)
+
     if plot:
         visual(
             trues[batch_index][instance_index],
             preds[batch_index][instance_index],
-            lower_bounds=lower_bounds,
-            upper_bounds=upper_bounds,
+            lower_bounds=lower_bounds[batch_index][instance_index],
+            upper_bounds=upper_bounds[batch_index][instance_index],
             file_name="test_probs.png",
         )
 
@@ -886,4 +884,6 @@ def test_probs(
         scaler=1,
     )
 
+    return crps_sum, crps
+    return crps_sum, crps
     return crps_sum, crps
