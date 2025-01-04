@@ -21,13 +21,7 @@ from tempo.models.GPT4TS import GPT4TS
 from tempo.models.PatchTST import PatchTST
 from tempo.models.T5 import T54TS
 from tempo.models.TEMPO import TEMPO
-from tempo.utils.tools import (
-    EarlyStopping,
-    adjust_learning_rate,
-    test,
-    test_probs,
-    vali,
-)
+from tempo.utils.tools import EarlyStopping, adjust_learning_rate, test, vali
 
 FIX_SEED = 2021
 random.seed(FIX_SEED)
@@ -80,7 +74,7 @@ def get_settings(args, itr, seq_len=336):
 
 def print_dataset_info(data, loader, name="Dataset"):
     print(f"\n=== {name} Information ===")
-    print(f"Number of samples: {len(data)}")
+    print(f"Number of samples: {len(data):,}")
     print(f"Batch size: {loader.batch_size}")
     print(f"Number of batches: {len(loader)}")
 
