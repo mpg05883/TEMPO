@@ -623,7 +623,7 @@ def main(args):
         """
         If loss function is set to "mse", then (value_1, value_2) will be
         (average_mae, average_mse).
-        
+
         Else, (value_1, value_2) will be (crps_sum, crps) 
         """
         value_1, value_2 = test(
@@ -640,6 +640,9 @@ def main(args):
 
         print(f"{metric_1}: {value_1:.4f}")
         print(f"{metric_2}: {value_2:.4f}")
+
+        if args.get_checkpoint or args.read_values:
+            break
 
     # Outside of for loop
     print("\nFinished!\n")
