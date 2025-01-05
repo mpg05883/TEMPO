@@ -41,6 +41,13 @@ SEASONALITY_MAP = {
 }
 
 
+def print_args_and_config(args, config):
+    print("\n========== Command line arguments ==========")
+    for key, value in vars(args).items():
+        print(f"{key}: {value}")
+    print(f"\n========== Config ==========\n{OmegaConf.to_yaml(config)}")
+
+
 def get_init_config(config_path=None):
     """
     Retrieves an initial configuration from a specified file path.
@@ -210,7 +217,7 @@ def studentT_nll(y_true, y_pred):
         y_pred: List of predicted values
 
     Returns:
-        _type_: Negative log-likelihood
+        : Negative log-likelihood
     """
     y_true = y_true.squeeze()
     mu, sigma, nu = y_pred[0], y_pred[1], y_pred[2]
@@ -236,7 +243,7 @@ def negative_binomial_nll(target, y_pred):
         y_pred: List of predicted values
 
     Returns:
-        _type_: Negative log-likelihood
+        : Negative log-likelihood
     """
     # Compute negative log-likelihood of Negative Binomial distribution
     mu, alpha = y_pred[0], y_pred[1]
@@ -258,57 +265,115 @@ def negative_binomial_nll(target, y_pred):
     return -log_prob.mean()
 
 
-def print_batch_update(
+def get_epoch_loss_msg(epoch, train_steps, train_loss, vali_loss):
+    """
+    Creates string displaying current epoch number, total number of training
+    steps in training set data loader, current epoch's training loss, and
+    current epoch's validation loss
+
+    Args:
+        epoch: Current epoch's number
+        train_steps: Total number of training steps in training set data loader
+        train_loss: Model's loss on training set
+        vali_loss: Model's loss on validation set
+
+    Returns:
+        str: string displaying current epoch number, total number of training
+             steps in training set data loader, current epoch's training loss,
+             and current epoch's validation loss
+    """
+    return f"Epoch: {epoch + 1}, Steps: {train_steps} | Train Loss: {train_loss:.7f} Val Loss: {vali_loss:.7f}"
+
+
+def get_epoch_time_msg(epoch, epoch_start_time):
+    """
+    Creates string displaying current epoch number and number of minutes
+    elapsed during current epoch
+
+    Args:
+        epoch: Current epoch's number
+        epoch_start_time: Time when current epoch started
+
+    Returns:
+        str: string displaying current epoch number and number of minutes
+             elapsed during current epoch
+    """
+    elapsed_time_min = (time.time() - epoch_start_time) / 60
+    return f"Epoch: {epoch + 1}, time elapsed: {elapsed_time_min:.0f} minutes"
+
+
+def get_batch_update_msgs(
     batch,
     epoch,
     loss,
     batch_start_time,
-    num_epochs,
+    num_batches,
     train_steps,
 ):
-    # Print current batch, epoch, and loss
-    print(f"Batch: {batch}, epoch: {epoch + 1}, loss: {loss.item():.7f}")
+    """
+    Generates two strings. The first string displays the current batch, epoch,
+    and loss. The second string displays the average epoch speed in seconds per
+    epoch and estimated remaining time in seconds
 
-    # Compute average time per epoch
-    speed = (time.time() - batch_start_time) / num_epochs
+    Args:
+        batch: Current batch number
+        epoch: Current epoch number
+        loss: Training loss during current batch
+        batch_start_time: Current batch's start time
+        num_batches: Total number of batches in current epoch
+        train_steps: Total number of training steps in training set data loader
+
+    Returns:
+        tuple: (batch_msg, speed_and_time_msg)
+    """
+    # Print current batch, epoch, and loss
+    batch_msg = f"Batch: {batch}, epoch: {epoch + 1}, loss: {loss.item():.7f}"
+
+    # Compute average time elapsed per epoch
+    speed = (time.time() - batch_start_time) / num_batches
+    speed_msg = f"Average epoch speed: {speed:.4f}s/epoch"
 
     # Estimate remaining amount of time in seconds
     remaining_time_seconds = speed * ((args.train_epochs - epoch) * train_steps - batch)
+    time_msg = f"estiamted remaining time: {remaining_time_seconds:.4f}s"
 
-    print(
-        f"\tAverage epoch speed: {speed:.4f}s/epoch, remaining time: {remaining_time_seconds:.4f}s"
-    )
+    speed_and_time_msg = f"\t{speed_msg}, {time_msg}"
+
+    return batch_msg, speed_and_time_msg
 
 
 def get_checkpoint(loss_func: str):
     """
-    Returns file path to a trained model's checkpoint
+    Returns a file path to a trained model's checkpoint
 
     Args:
         loss_func: Loss function that trained model optimized. Determines
                    if deterministic or probabilistic checkpoint is returned
+
+    Returns:
+        str: File path to trained model's checkpoint
     """
     # Checkpoints directory
     checkpoints_dir = "checkpoints"
 
     # Directory path to checkpoints
-    checkpoint = os.path.join(checkpoints_dir, "Monash_1")
+    checkpoints_dir_path = os.path.join(checkpoints_dir, "Monash_1")
 
     if loss_func == "mse":
         # Get deterministic model
-        checkpoint = os.path.join(
-            checkpoint,
+        checkpoints_dir_path = os.path.join(
+            checkpoints_dir_path,
             "Demo_Monash_TEMPO_6_prompt_learn_336_96_100_sl336_ll0_pl96_dm768_nh4_el3_gl6_df768_ebtimeF_itr0",
         )
     else:
         # Get probabilstic model
-        checkpoint = os.path.join(
-            checkpoint,
+        checkpoints_dir_path = os.path.join(
+            checkpoints_dir_path,
             "Demo_Monash_TEMPO_Prob_6_prompt_learn_336_96_100_sl336_ll0_pl96_dm768_nh4_el3_gl6_df768_ebtimeF_itr0",
         )
 
     # File path to checkpoint
-    checkpoint_file_path = os.path.join(checkpoint, "checkpoint.pth")
+    checkpoint_file_path = os.path.join(checkpoints_dir_path, "checkpoint.pth")
 
     return checkpoint_file_path
 
@@ -316,15 +381,15 @@ def get_checkpoint(loss_func: str):
 def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
     """
     Trains a model for either deterministic or probabilstic time series
-    forecasting
+    forecasting, depending on the loss function specified in args
 
     Args:
         args: Command line arguments
         device: Device to run model on
-        train_loader: Data loader for training set
+        train_loader: Training set's data loader
         vali_data: Validation set
-        vali_loader: Data loader for validation set
-        iteration: Iteration number
+        vali_loader: Validation set's data loader
+        iteration: Iteration number of for loop in main()
 
     Returns:
         model: Trained model
@@ -357,7 +422,7 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
 
     model.to(device)
 
-    # Set loss function
+    # Specify loss function
     if args.loss_func == "mse":
         criterion = nn.MSELoss()
     elif args.loss_func == "smape":
@@ -384,15 +449,16 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
     # Get number of training steps
     train_steps = len(train_loader)
 
+    # Train model for args.train_epochs epochs
     for epoch in range(args.train_epochs):
         epoch_start_time = time.time()
         print(f"\n========== Epoch {epoch + 1}/{args.train_epochs} ==========")
-        num_epochs = 0
+        num_batches = 0
         train_loss = []
 
         for i, data in tqdm(enumerate(train_loader), total=train_steps):
             batch_start_time = time.time()
-            num_epochs += 1
+            num_batches += 1
 
             batch_x, batch_y, batch_x_mark, batch_y_mark = (
                 data[0],  # Input time series
@@ -458,14 +524,18 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
 
             # Print update every 1000 batches
             if (i + 1) % 1000 == 0:
-                print_batch_update(
+                batch_msg, speed_and_time_msg = get_batch_update_msgs(
                     i,
                     epoch,
                     loss,
                     batch_start_time,
-                    num_epochs,
+                    num_batches,
                     train_steps,
                 )
+
+                print(batch_msg)
+
+                print(speed_and_time_msg)
 
             # Compute backward pass
             loss.backward()
@@ -474,22 +544,26 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
             model_optim.step()
 
         # Print update after finishing current epoch
-        print(
-            f"Epoch: {epoch + 1}, time elapsed: {((time.time() - epoch_start_time) / 60):.0f} minutes"
-        )
+        epoch_time_msg = get_epoch_time_msg(epoch, epoch_start_time)
+        print(epoch_time_msg)
 
         # Compute current epoch's average training loss
         train_loss = np.average(train_loss)
 
         # Compute current epoch's validation loss
         vali_loss = vali(
-            model, vali_data, vali_loader, criterion, args, device, iteration
+            model,
+            vali_data,
+            vali_loader,
+            criterion,
+            args,
+            device,
+            iteration,
         )
 
         # Print current epoch's training and validation loss
-        print(
-            f"Epoch: {epoch + 1}, Steps: {train_steps} | Train Loss: {train_loss:.7f} Val Loss: {vali_loss:.7f}"
-        )
+        epoch_loss_msg = get_epoch_loss_msg(epoch, train_steps, train_loss, vali_loss)
+        print(epoch_loss_msg)
 
         if args.cos:
             scheduler.step()
@@ -505,18 +579,15 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
     return model
 
 
-# TODO: once you finish merging det and prob scripts, ask Defu what notebook he used to start parallelizing the training script
+# TODO: parallelize training and evaluation script
 def main(args):
     # Load configuration
     config = get_init_config(args.config_path)
 
     if args.print_args_and_config:
-        print("\n========== Command line arguments ==========")
-        for key, value in vars(args).items():
-            print(f"{key}: {value}")
-        print(f"\n========== Config ==========\n{OmegaConf.to_yaml(config)}")
+        print_args_and_config(args, config)
 
-    # Set device to run model on
+    # Specify device to run model on
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\nModel will run on {device}")
 
@@ -543,10 +614,7 @@ def main(args):
             print(f"\nLoading trained model from {checkpoint_file_path}...")
 
             # Load trained model's parameters
-            model.load_state_dict(
-                torch.load(checkpoint_file_path),
-                strict=False,
-            )
+            model.load_state_dict(torch.load(checkpoint_file_path), strict=False)
         else:
             print("\nStarting training procedure...")
             model = train_model(args, device, train_loader, vali_data, vali_loader, i)
@@ -567,21 +635,21 @@ def main(args):
             read_values=args.read_values,
         )
 
-        if args.loss_func == "mse":
-            print(f"Average MAE: {value_1:.4f}")
-            print(f"Average MSE: {value_2:.4f}")
-        else:
-            print(f"CRPS Sum: {value_1:.4f}")
-            print(f"CRPS: {value_2:.4f}")
+        metric_1 = "Average MAE" if args.loss_func == "mse" else "CRPS Sum"
+        metric_2 = "Average MSE" if args.loss_func == "mse" else "CRPS"
 
+        print(f"{metric_1}: {value_1:.4f}")
+        print(f"{metric_2}: {value_2:.4f}")
+
+    # Outside of for loop
     print("\nFinished!\n")
 
 
 """
-Probabilstic forecasting script:
+To run probabilstic forecasting script, use:
 bash ./scripts/monash_prob_demo.sh
 
-Deterministic forecasting script:
+To run deterministic forecasting script, use:
 bash ./scripts/monash_demo.sh
 """
 if __name__ == "__main__":
@@ -635,6 +703,7 @@ if __name__ == "__main__":
         "--seq_len",
         type=int,
         default=512,
+        help="Total number of time steps in ground truth time series",
     )
     parser.add_argument(
         "--pred_len",
@@ -673,7 +742,7 @@ if __name__ == "__main__":
         "--train_epochs",
         type=int,
         default=1,
-        help="Number of training epochs",
+        help="Number of epochs to use during traiing",
     )
     parser.add_argument(
         "--lradj",
@@ -763,7 +832,7 @@ if __name__ == "__main__":
         type=str,
         choices=["DLinear", "TEMPO", "T5", "ETSformer"],
         default="TEMPO",
-        help="Type of model that'll be trained and evaluated",
+        help="Model architecture that'll be trained and evaluated",
     )
     parser.add_argument(
         "--stride",
@@ -819,20 +888,20 @@ if __name__ == "__main__":
         default=0.01,
     )
 
-    # Name of configs directory
+    # Name of configurations directory
     configs_dir = "configs"
 
-    # Name of config
+    # Name of configuration
     config = "run_TEMPO.yml"
 
-    # Create file path to config
+    # Create file path to configuration
     config_path = os.path.join(configs_dir, config)
 
     parser.add_argument(
         "--config_path",
         type=str,
         default=config_path,
-        help="Path to configuration file",
+        help="Path to configuration file to use during training and evaluation",
     )
     parser.add_argument(
         "--datasets",
@@ -887,13 +956,13 @@ if __name__ == "__main__":
         "--get_checkpoint",
         type=bool,
         default=True,
-        help="Set to True to load trained model",
+        help="Set to True to skip training procedure and evaluate trained model",
     )
     parser.add_argument(
         "--read_values",
         type=bool,
         default=True,
-        help="Set to True to read predicted and true values from a .csv file",
+        help="Set to True to read predicted and true values from .csv file",
     )
 
     args = parser.parse_args()
