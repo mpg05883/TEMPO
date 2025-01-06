@@ -41,26 +41,26 @@ SEASONALITY_MAP = {
 }
 
 
-def print_args_and_config(args, config):
-    print("\n========== Command line arguments ==========")
-    for key, value in vars(args).items():
-        print(f"{key}: {value}")
-    print(f"\n========== Config ==========\n{OmegaConf.to_yaml(config)}")
+# def print_args_and_config(args, config):
+#     print("\n========== Command line arguments ==========")
+#     for key, value in vars(args).items():
+#         print(f"{key}: {value}")
+#     print(f"\n========== Config ==========\n{OmegaConf.to_yaml(config)}")
 
 
-def get_init_config(config_path=None):
-    """
-    Retrieves an initial configuration from a specified file path.
+# def get_init_config(config_path=None):
+#     """
+#     Retrieves an initial configuration from a specified file path.
 
-    Args:
-        config_path (str, optional): Path to a configuration file that'll be
-        used to initialize the model. Defaults to None.
+#     Args:
+#         config_path (str, optional): Path to a configuration file that'll be
+#         used to initialize the model. Defaults to None.
 
-    Returns:
-        config (OmegaConf): Configuration object for initializing the model
-    """
-    config = OmegaConf.load(config_path)
-    return config
+#     Returns:
+#         config (OmegaConf): Configuration object for initializing the model
+#     """
+#     config = OmegaConf.load(config_path)
+#     return config
 
 
 def get_settings(args, itr, seq_len=336):
@@ -100,7 +100,8 @@ def prepare_data_loaders(args, config):
         config: Configuration dictionary
 
     Returns:
-        tuple: (train_data, train_loader, test_data, test_loader, val_data, val_loader)
+        tuple: (train_data, train_loader, test_data, test_loader, val_data,
+                val_loader)
     """
     train_datas = []
     val_datas = []
@@ -265,7 +266,7 @@ def negative_binomial_nll(target, y_pred):
     return -log_prob.mean()
 
 
-def get_epoch_loss_msg(epoch, train_steps, train_loss, vali_loss):
+def print_epoch_loss(epoch, training_steps, train_loss, vali_loss):
     """
     Creates string displaying current epoch number, total number of training
     steps in training set data loader, current epoch's training loss, and
@@ -273,7 +274,7 @@ def get_epoch_loss_msg(epoch, train_steps, train_loss, vali_loss):
 
     Args:
         epoch: Current epoch's number
-        train_steps: Total number of training steps in training set data loader
+        training_steps: Total number of training steps in training set data loader
         train_loss: Model's loss on training set
         vali_loss: Model's loss on validation set
 
@@ -282,36 +283,34 @@ def get_epoch_loss_msg(epoch, train_steps, train_loss, vali_loss):
              steps in training set data loader, current epoch's training loss,
              and current epoch's validation loss
     """
-    return f"Epoch: {epoch + 1}, Steps: {train_steps} | Train Loss: {train_loss:.7f} Val Loss: {vali_loss:.7f}"
+    print(
+        f"Epoch: {epoch + 1}, Steps: {training_steps} | Train Loss: {train_loss:.7f} Val Loss: {vali_loss:.7f}"
+    )
 
 
-def get_epoch_time_msg(epoch, epoch_start_time):
+def print_epoch_time(epoch, epoch_start_time):
     """
-    Creates string displaying current epoch number and number of minutes
+    Prints string displaying current epoch number and number of minutes
     elapsed during current epoch
 
     Args:
         epoch: Current epoch's number
         epoch_start_time: Time when current epoch started
-
-    Returns:
-        str: string displaying current epoch number and number of minutes
-             elapsed during current epoch
     """
     elapsed_time_min = (time.time() - epoch_start_time) / 60
-    return f"Epoch: {epoch + 1}, time elapsed: {elapsed_time_min:.0f} minutes"
+    print(f"Epoch: {epoch + 1}, time elapsed: {elapsed_time_min:.0f} minutes")
 
 
-def get_batch_update_msgs(
+def print_batch_updates(
     batch,
     epoch,
     loss,
     batch_start_time,
     num_batches,
-    train_steps,
+    training_steps,
 ):
     """
-    Generates two strings. The first string displays the current batch, epoch,
+    Prints two strings. The first string displays the current batch, epoch,
     and loss. The second string displays the average epoch speed in seconds per
     epoch and estimated remaining time in seconds
 
@@ -321,25 +320,27 @@ def get_batch_update_msgs(
         loss: Training loss during current batch
         batch_start_time: Current batch's start time
         num_batches: Total number of batches in current epoch
-        train_steps: Total number of training steps in training set data loader
-
-    Returns:
-        tuple: (batch_msg, speed_and_time_msg)
+        training_steps: Total number of training steps in training set data loader
     """
-    # Print current batch, epoch, and loss
+    # Create message displaying current batch, epoch, and loss
     batch_msg = f"Batch: {batch}, epoch: {epoch + 1}, loss: {loss.item():.7f}"
+
+    print(batch_msg)
 
     # Compute average time elapsed per epoch
     speed = (time.time() - batch_start_time) / num_batches
     speed_msg = f"Average epoch speed: {speed:.4f}s/epoch"
 
     # Estimate remaining amount of time in seconds
-    remaining_time_seconds = speed * ((args.train_epochs - epoch) * train_steps - batch)
+    remaining_time_seconds = speed * (
+        (args.train_epochs - epoch) * training_steps - batch
+    )
     time_msg = f"estiamted remaining time: {remaining_time_seconds:.4f}s"
 
+    # Create message displaying epoch speed and remaining time
     speed_and_time_msg = f"\t{speed_msg}, {time_msg}"
 
-    return batch_msg, speed_and_time_msg
+    print(speed_and_time_msg)
 
 
 def get_checkpoint(loss_func: str):
@@ -347,33 +348,36 @@ def get_checkpoint(loss_func: str):
     Returns a file path to a trained model's checkpoint
 
     Args:
-        loss_func: Loss function that trained model optimized. Determines
-                   if deterministic or probabilistic checkpoint is returned
+        loss_func: Loss function that model was trained to optimized.
+                   Determines if deterministic or probabilistic model
+                   checkpoint is returned
 
     Returns:
         str: File path to trained model's checkpoint
     """
-    # Checkpoints directory
+    # Directory where checkpoints are stored
     checkpoints_dir = "checkpoints"
 
-    # Directory path to checkpoints
+    # Path to checkpoints_dir (./checkpoints)
     checkpoints_dir_path = os.path.join(checkpoints_dir, "Monash_1")
 
-    if loss_func == "mse":
-        # Get deterministic model
-        checkpoints_dir_path = os.path.join(
-            checkpoints_dir_path,
-            "Demo_Monash_TEMPO_6_prompt_learn_336_96_100_sl336_ll0_pl96_dm768_nh4_el3_gl6_df768_ebtimeF_itr0",
-        )
-    else:
-        # Get probabilstic model
-        checkpoints_dir_path = os.path.join(
-            checkpoints_dir_path,
-            "Demo_Monash_TEMPO_Prob_6_prompt_learn_336_96_100_sl336_ll0_pl96_dm768_nh4_el3_gl6_df768_ebtimeF_itr0",
-        )
+    """
+    If loss func is "mse", then get deterministic model's directory. Else, get
+    probabilstic model's directory
+    """
+    is_prob = "_Prob_" if loss_func == "mse" else "_"
 
-    # File path to checkpoint
-    checkpoint_file_path = os.path.join(checkpoints_dir_path, "checkpoint.pth")
+    # Directory where model's checkpoint is stored
+    model_dir = f"Demo_Monash_TEMPO{is_prob}6_prompt_learn_336_96_100_sl336_ll0_pl96_dm768_nh4_el3_gl6_df768_ebtimeF_itr0"
+
+    # Path to model_dir (./checkpoints/model_dir)
+    model_dir_path = os.path.join(checkpoints_dir_path, model_dir)
+
+    # Name of checkpoint file in model_dir
+    checkpoint_file = "checkpoint.pth"
+
+    # Path to checkpoint.pth (./checkpoints/model_dir/checkpoint_file)
+    checkpoint_file_path = os.path.join(model_dir_path, checkpoint_file)
 
     return checkpoint_file_path
 
@@ -447,7 +451,7 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
     )
 
     # Get number of training steps
-    train_steps = len(train_loader)
+    training_steps = len(train_loader)
 
     # Train model for args.train_epochs epochs
     for epoch in range(args.train_epochs):
@@ -456,7 +460,7 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
         num_batches = 0
         train_loss = []
 
-        for i, data in tqdm(enumerate(train_loader), total=train_steps):
+        for i, data in tqdm(enumerate(train_loader), total=training_steps):
             batch_start_time = time.time()
             num_batches += 1
 
@@ -524,18 +528,14 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
 
             # Print update every 1000 batches
             if (i + 1) % 1000 == 0:
-                batch_msg, speed_and_time_msg = get_batch_update_msgs(
+                print_batch_updates(
                     i,
                     epoch,
                     loss,
                     batch_start_time,
                     num_batches,
-                    train_steps,
+                    training_steps,
                 )
-
-                print(batch_msg)
-
-                print(speed_and_time_msg)
 
             # Compute backward pass
             loss.backward()
@@ -544,8 +544,7 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
             model_optim.step()
 
         # Print update after finishing current epoch
-        epoch_time_msg = get_epoch_time_msg(epoch, epoch_start_time)
-        print(epoch_time_msg)
+        print_epoch_time(epoch, epoch_start_time)
 
         # Compute current epoch's average training loss
         train_loss = np.average(train_loss)
@@ -562,8 +561,7 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
         )
 
         # Print current epoch's training and validation loss
-        epoch_loss_msg = get_epoch_loss_msg(epoch, train_steps, train_loss, vali_loss)
-        print(epoch_loss_msg)
+        print_epoch_loss(epoch, training_steps, train_loss, vali_loss)
 
         if args.cos:
             scheduler.step()
@@ -582,10 +580,13 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
 # TODO: parallelize training and evaluation script
 def main(args):
     # Load configuration
-    config = get_init_config(args.config_path)
+    config = OmegaConf.load(args.config_path)
 
     if args.print_args_and_config:
-        print_args_and_config(args, config)
+        print("\n========== Command line arguments ==========")
+        for key, value in vars(args).items():
+            print(f"{key}: {value}")
+        print(f"\n========== Config ==========\n{OmegaConf.to_yaml(config)}")
 
     # Specify device to run model on
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -614,7 +615,10 @@ def main(args):
             print(f"\nLoading trained model from {checkpoint_file_path}...")
 
             # Load trained model's parameters
-            model.load_state_dict(torch.load(checkpoint_file_path), strict=False)
+            model.load_state_dict(
+                torch.load(checkpoint_file_path),
+                strict=False,
+            )
         else:
             print("\nStarting training procedure...")
             model = train_model(args, device, train_loader, vali_data, vali_loader, i)
@@ -649,10 +653,10 @@ def main(args):
 
 
 """
-To run probabilstic forecasting script, use:
+To run probabilstic forecasting script, use the following command:
 bash ./scripts/monash_prob_demo.sh
 
-To run deterministic forecasting script, use:
+To run deterministic forecasting script, use the following command:
 bash ./scripts/monash_demo.sh
 """
 if __name__ == "__main__":
@@ -666,7 +670,7 @@ if __name__ == "__main__":
         default="weather_GTP4TS_multi-debug",
     )
 
-    # Name of checkpoints directory
+    # Directory where all model checkpoints are stored
     checkpoints_dir = "checkpoints"
 
     # Create checkpoints directory if it doesn't exist
@@ -674,16 +678,16 @@ if __name__ == "__main__":
         os.makedirs(checkpoints_dir)
 
     # Create default directory to save model
-    checkpoint = "default"
+    default_dir = "default"
 
     # Create path to default directory
-    checkpoints_path = os.path.join(checkpoints_dir, checkpoint)
+    default_dir_path = os.path.join(checkpoints_dir, default_dir)
 
     parser.add_argument(
         "--checkpoints",
         type=str,
-        default=checkpoints_path,
-        help="Directory path where model will be saved",
+        default=default_dir_path,
+        help="Directory path where model's checkpoints will be saved",
     )
     parser.add_argument(
         "--task_name",
@@ -818,7 +822,7 @@ if __name__ == "__main__":
         type=str,
         choices=["mse", "prob", "negative_binomial"],
         default="mse",
-        help="Loss function to minimize during training",
+        help='Loss function to minimize during training. Set to "mse" for deterministic forecasting',
     )
     parser.add_argument(
         "--pretrain",
@@ -891,19 +895,19 @@ if __name__ == "__main__":
         default=0.01,
     )
 
-    # Name of configurations directory
+    # Directory where all configurations are stored
     configs_dir = "configs"
 
-    # Name of configuration
-    config = "run_TEMPO.yml"
+    # Name of default configuration
+    default_config = "run_TEMPO.yml"
 
     # Create file path to configuration
-    config_path = os.path.join(configs_dir, config)
+    default_config_path = os.path.join(configs_dir, default_config)
 
     parser.add_argument(
         "--config_path",
         type=str,
-        default=config_path,
+        default=default_config_path,
         help="Path to configuration file to use during training and evaluation",
     )
     parser.add_argument(
@@ -959,7 +963,7 @@ if __name__ == "__main__":
         "--get_checkpoint",
         type=bool,
         default=True,
-        help="Set to True to skip training procedure and evaluate trained model",
+        help="Set to True to skip training and evaluate a trained model",
     )
     parser.add_argument(
         "--read_values",
