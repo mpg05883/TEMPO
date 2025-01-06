@@ -41,26 +41,26 @@ SEASONALITY_MAP = {
 }
 
 
-# def print_args_and_config(args, config):
-#     print("\n========== Command line arguments ==========")
-#     for key, value in vars(args).items():
-#         print(f"{key}: {value}")
-#     print(f"\n========== Config ==========\n{OmegaConf.to_yaml(config)}")
+def print_args_and_config(args, config):
+    print("\n========== Command line arguments ==========")
+    for key, value in vars(args).items():
+        print(f"{key}: {value}")
+    print(f"\n========== Config ==========\n{OmegaConf.to_yaml(config)}")
 
 
-# def get_init_config(config_path=None):
-#     """
-#     Retrieves an initial configuration from a specified file path.
+def get_init_config(config_path=None):
+    """
+    Retrieves an initial configuration from a specified file path.
 
-#     Args:
-#         config_path (str, optional): Path to a configuration file that'll be
-#         used to initialize the model. Defaults to None.
+    Args:
+        config_path (str, optional): Path to a configuration file that'll be
+        used to initialize the model. Defaults to None.
 
-#     Returns:
-#         config (OmegaConf): Configuration object for initializing the model
-#     """
-#     config = OmegaConf.load(config_path)
-#     return config
+    Returns:
+        config (OmegaConf): Configuration object for initializing the model
+    """
+    config = OmegaConf.load(config_path)
+    return config
 
 
 def get_settings(args, itr, seq_len=336):
@@ -580,13 +580,10 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
 # TODO: parallelize training and evaluation script
 def main(args):
     # Load configuration
-    config = OmegaConf.load(args.config_path)
+    config = get_init_config(args.config_path)
 
     if args.print_args_and_config:
-        print("\n========== Command line arguments ==========")
-        for key, value in vars(args).items():
-            print(f"{key}: {value}")
-        print(f"\n========== Config ==========\n{OmegaConf.to_yaml(config)}")
+        print_args_and_config(args, config)
 
     # Specify device to run model on
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
