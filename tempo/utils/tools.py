@@ -1,4 +1,3 @@
-import logging
 import os
 from datetime import datetime
 from distutils.util import strtobool
@@ -25,11 +24,6 @@ from tempo.utils.imputation_metrics import (  # mae_withmask,; mse_withmask,
 # from tempo.utils.metrics import metric
 
 plt.switch_backend("agg")
-
-
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s: %(message)s", datefmt="%m/%d/%Y %I:%M:%S%p"
-)
 
 
 def load_data_from_huggingface(repo_id, filename):
@@ -107,23 +101,23 @@ class EarlyStopping:
         score = -val_loss
         if self.best_score is None:
             self.best_score = score
-            logging.info(f"Val loss = {val_loss}, saving model to {path}")
             self.save_checkpoint(val_loss, model, path)
         elif score < self.best_score + self.delta:
             self.counter += 1
-            print(f"EarlyStopping counter: {self.counter} out of {self.patience}")
+            print(
+                f"No decrease in val loss. EarlyStopping counter: {self.counter} out of {self.patience}"
+            )
             if self.counter >= self.patience:
                 self.early_stop = True
         else:
             self.best_score = score
-            logging.info(f"Val loss = {val_loss}, saving model to {path}")
             self.save_checkpoint(val_loss, model, path)
             self.counter = 0
 
     def save_checkpoint(self, val_loss, model, path):
         if self.verbose:
             print(
-                f"Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ..."
+                f"Val loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}). Saving model to {path}..."
             )
         torch.save(model.state_dict(), path + "/" + "checkpoint.pth")
         self.val_loss_min = val_loss

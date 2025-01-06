@@ -35,25 +35,25 @@ do
 dir1="logs/$model"
 if [ ! -d "$dir1" ]; then
     mkdir -p "$dir1"
-    echo "Directory $dir1 has been created."
+    echo "Directory $dir1 has been created"
 else
-    echo "Directory $dir1 already exists."
+    echo "Directory $dir1 already exists"
 fi
 
 dir2="logs/$model/ReVIN_${prompt}_prompt_equal_${equal}"
 if [ ! -d "$dir2" ]; then
     mkdir -p "$dir2"
-    echo "Directory $dir2 has been created."
+    echo "Directory $dir2 has been created"
 else
-    echo "Directory $dir2 already exists."  
+    echo "Directory $dir2 already exists"  
 fi
 
 dir3="${dir2}/Monash_${model}_${gpt_layer}"
 if [ ! -d "$dir3" ]; then
     mkdir -p "$dir3"
-    echo "Directory $dir3 has been created."
+    echo "Directory $dir3 has been created"
 else
-    echo "Directory $dir3 already exists."
+    echo "Directory $dir3 already exists"
 fi
 
 log_path="${dir3}/test_${seq_len}_${pred_len}_lr${lr}.log"
@@ -76,7 +76,7 @@ python train_eval.py \
     --prompt $prompt\
     --batch_size 256 \
     --learning_rate $lr \
-    --train_epochs 1 \
+    --train_epochs 2 \
     --decay_fac 0.5 \
     --d_model 768 \
     --n_heads 4 \
@@ -87,7 +87,7 @@ python train_eval.py \
     --patch_size 16 \
     --stride 8 \
     --gpt_layer $gpt_layer \
-    --itr 1 \
+    --itr 2 \
     --model $model \
     --tmax $tmax \
     --cos 1 \

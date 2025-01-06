@@ -80,15 +80,15 @@ def get_settings(args, itr, seq_len=336):
 
 
 def print_dataset_info(data, loader, name="Dataset"):
-    print(f"\n========== {name} Info ==========")
-    print(f"Number of samples: {len(data):,}")
-    print(f"Batch size: {loader.batch_size}")
-    print(f"Number of batches: {len(loader)}")
+    print(f"\n{name} Info:")
+    print(f"- Number of samples: {len(data):,}")
+    print(f"- Batch size: {loader.batch_size}")
+    print(f"- Number of batches: {len(loader)}")
 
     attributes = ["features", "targets", "shape"]
     for attr in attributes:
         if hasattr(data, attr):
-            print(f"{attr}: {getattr(data, attr)}")
+            print(f"- {attr}: {getattr(data, attr)}")
 
 
 def prepare_data_loaders(args, config):
@@ -266,15 +266,13 @@ def negative_binomial_nll(target, y_pred):
     return -log_prob.mean()
 
 
-def print_epoch_loss(epoch, training_steps, train_loss, vali_loss):
+def print_epoch_loss(train_loss, vali_loss):
     """
-    Creates string displaying current epoch number, total number of training
-    steps in training set data loader, current epoch's training loss, and
-    current epoch's validation loss
+    Prints two strings. The first string displays current epoch number and
+    total number of training steps. Second string displays current epoch's
+    training loss and validation loss
 
     Args:
-        epoch: Current epoch's number
-        training_steps: Total number of training steps in training set data loader
         train_loss: Model's loss on training set
         vali_loss: Model's loss on validation set
 
@@ -283,22 +281,18 @@ def print_epoch_loss(epoch, training_steps, train_loss, vali_loss):
              steps in training set data loader, current epoch's training loss,
              and current epoch's validation loss
     """
-    print(
-        f"Epoch: {epoch + 1}, Steps: {training_steps} | Train Loss: {train_loss:.7f} Val Loss: {vali_loss:.7f}"
-    )
+    print(f"Train loss: {train_loss:.3f} | Val loss: {vali_loss:.3f}")
 
 
-def print_epoch_time(epoch, epoch_start_time):
+def print_epoch_time(epoch_start_time):
     """
-    Prints string displaying current epoch number and number of minutes
-    elapsed during current epoch
+    Prints string displaying number of minutes elapsed during current epoch
 
     Args:
-        epoch: Current epoch's number
         epoch_start_time: Time when current epoch started
     """
-    elapsed_time_min = (time.time() - epoch_start_time) / 60
-    print(f"Epoch: {epoch + 1}, time elapsed: {elapsed_time_min:.0f} minutes")
+    time_elapsed_min = np.abs((time.time() - epoch_start_time) / 60)
+    print(f"Time elapsed: {time_elapsed_min:.0f} minutes")
 
 
 def print_batch_updates(
@@ -323,19 +317,19 @@ def print_batch_updates(
         training_steps: Total number of training steps in training set data loader
     """
     # Create message displaying current batch, epoch, and loss
-    batch_msg = f"Batch: {batch}, epoch: {epoch + 1}, loss: {loss.item():.7f}"
+    batch_msg = f"Batch: {batch}, epoch: {epoch + 1}, loss: {loss.item():.3f}"
 
     print(batch_msg)
 
     # Compute average time elapsed per epoch
     speed = (time.time() - batch_start_time) / num_batches
-    speed_msg = f"Average epoch speed: {speed:.4f}s/epoch"
+    speed_msg = f"Average epoch speed: {speed:.3f}s/epoch"
 
     # Estimate remaining amount of time in seconds
     remaining_time_seconds = speed * (
         (args.train_epochs - epoch) * training_steps - batch
     )
-    time_msg = f"estiamted remaining time: {remaining_time_seconds:.4f}s"
+    time_msg = f"estiamted remaining time: {remaining_time_seconds:.0f}s"
 
     # Create message displaying epoch speed and remaining time
     speed_and_time_msg = f"\t{speed_msg}, {time_msg}"
@@ -445,9 +439,7 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
 
     # Initialize scheduler
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        model_optim,
-        T_max=args.tmax,
-        eta_min=1e-8,
+        model_optim, T_max=args.tmax, eta_min=1e-8
     )
 
     # Get number of training steps
@@ -544,7 +536,7 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
             model_optim.step()
 
         # Print update after finishing current epoch
-        print_epoch_time(epoch, epoch_start_time)
+        # print_epoch_time(epoch_start_time)
 
         # Compute current epoch's average training loss
         train_loss = np.average(train_loss)
@@ -561,17 +553,20 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
         )
 
         # Print current epoch's training and validation loss
-        print_epoch_loss(epoch, training_steps, train_loss, vali_loss)
+        print_epoch_loss(train_loss, vali_loss)
 
         if args.cos:
             scheduler.step()
-            print("lr = {:.10f}".format(model_optim.param_groups[0]["lr"]))
+            print("Learning rate: {:.3e}".format(model_optim.param_groups[0]["lr"]))
         else:
             adjust_learning_rate(model_optim, epoch + 1, args)
 
         early_stopping(vali_loss, model, model_path)
         if early_stopping.early_stop:
-            print("Early stopping")
+            print(
+                f"\nEarlyStopping reached{early_stopping.counter}/{early_stopping.patience}"
+            )
+            print("Ending training procedure early...")
             break
 
     return model
@@ -579,6 +574,8 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
 
 # TODO: parallelize training and evaluation script
 def main(args):
+    start_time = time.time()
+
     # Load configuration
     config = get_init_config(args.config_path)
 
@@ -612,10 +609,7 @@ def main(args):
             print(f"\nLoading trained model from {checkpoint_file_path}...")
 
             # Load trained model's parameters
-            model.load_state_dict(
-                torch.load(checkpoint_file_path),
-                strict=False,
-            )
+            model.load_state_dict(torch.load(checkpoint_file_path), strict=False)
         else:
             print("\nStarting training procedure...")
             model = train_model(args, device, train_loader, vali_data, vali_loader, i)
@@ -646,7 +640,8 @@ def main(args):
             break
 
     # Outside of for loop
-    print("\nFinished!\n")
+    total_time_elapsed_min = np.abs((time.time() - start_time) / 60)
+    print(f"\nFinished! Total time elapsed: {total_time_elapsed_min:.0f} minutes\n")
 
 
 """
@@ -818,7 +813,7 @@ if __name__ == "__main__":
         "--loss_func",
         type=str,
         choices=["mse", "prob", "negative_binomial"],
-        default="mse",
+        default="prob",
         help='Loss function to minimize during training. Set to "mse" for deterministic forecasting',
     )
     parser.add_argument(
@@ -959,13 +954,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--get_checkpoint",
         type=bool,
-        default=True,
+        default=False,
         help="Set to True to skip training and evaluate a trained model",
     )
     parser.add_argument(
         "--read_values",
         type=bool,
-        default=True,
+        default=False,
         help="Set to True to read predicted and true values from .csv file",
     )
 
