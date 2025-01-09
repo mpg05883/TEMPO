@@ -42,6 +42,10 @@ Run the following command to build the conda envionrment
 ```
 ./tempo/build_env.sh
 ```
+Then, install TimeAGI
+```
+pip install timeagi
+```
 
 ## Script Demo
 

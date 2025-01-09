@@ -650,6 +650,9 @@ bash ./scripts/monash_prob_demo.sh
 
 To run deterministic forecasting script, use the following command:
 bash ./scripts/monash_demo.sh
+
+! I think something's wrong with the version of PyTorch in the Conda env bc
+! I can't use any GPUs with it
 """
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -813,7 +816,7 @@ if __name__ == "__main__":
         "--loss_func",
         type=str,
         choices=["mse", "prob", "negative_binomial"],
-        default="prob",
+        default="mse",
         help='Loss function to minimize during training. Set to "mse" for deterministic forecasting',
     )
     parser.add_argument(
@@ -954,13 +957,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--get_checkpoint",
         type=bool,
-        default=False,
+        default=True,
         help="Set to True to skip training and evaluate a trained model",
     )
     parser.add_argument(
         "--read_values",
         type=bool,
-        default=False,
+        default=True,
         help="Set to True to read predicted and true values from .csv file",
     )
 
