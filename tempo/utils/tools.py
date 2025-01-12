@@ -96,6 +96,7 @@ class EarlyStopping:
         self.early_stop = False
         self.val_loss_min = np.Inf
         self.delta = delta
+        self.rank
 
     def __call__(self, val_loss, model, path, accelerator):
         score = -val_loss
@@ -104,9 +105,10 @@ class EarlyStopping:
             self.save_checkpoint(val_loss, model, path, accelerator)
         elif score < self.best_score + self.delta:
             self.counter += 1
-            print(
-                f"No decrease in val loss. EarlyStopping counter: {self.counter} out of {self.patience}"
-            )
+            if model.rank == 0:
+                print(
+                    f"No decrease in val loss. EarlyStopping counter: {self.counter} out of {self.patience}"
+                )
             if self.counter >= self.patience:
                 self.early_stop = True
         else:
@@ -118,15 +120,13 @@ class EarlyStopping:
         if not accelerator.is_main_process:
             return
 
-        if self.verbose:
+        if self.verbose and model.rank == 0:
             print(
                 f"Val loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}). Saving model to {path}..."
             )
-        # Unwrap model
-        unwrapped_model = accelerator.unwrap_model(model)
 
-        # Save state dictionary
-        torch.save(unwrapped_model.state_dict(), path + "/" + "checkpoint.pth")
+        # Unwrap model from DDP and save state dictionary
+        torch.save(model.module.state_dict(), path + "/" + "checkpoint.pth")
         self.val_loss_min = val_loss
 
 

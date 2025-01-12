@@ -21,7 +21,7 @@ from tempo.utils.rev_in import RevIn
 
 class GPT4TS(nn.Module):
 
-    def __init__(self, configs, device):
+    def __init__(self, configs, device=None):
         super(GPT4TS, self).__init__()
         self.is_gpt = configs.is_gpt
         self.patch_size = configs.patch_size

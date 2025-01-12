@@ -9,7 +9,7 @@ from transformers import T5ForConditionalGeneration, T5Tokenizer
 
 class T54TS(nn.Module):
 
-    def __init__(self, configs, device):
+    def __init__(self, configs, device=None):
         super(T54TS, self).__init__()
         self.is_gpt = configs.is_gpt
         self.patch_size = configs.patch_size

@@ -16,7 +16,7 @@ class ETSformer(nn.Module):
     Paper link: https://arxiv.org/abs/2202.01381
     """
 
-    def __init__(self, configs, devices):
+    def __init__(self, configs, device=None):
         super(ETSformer, self).__init__()
         self.task_name = configs.task_name
         self.seq_len = configs.seq_len
