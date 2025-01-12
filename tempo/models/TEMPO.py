@@ -99,7 +99,7 @@ class moving_avg(nn.Module):
 
 class TEMPO(nn.Module):
 
-    def __init__(self, configs, device):
+    def __init__(self, configs, device=None):
         super(TEMPO, self).__init__()
         self.is_gpt = configs.is_gpt
         self.patch_size = configs.patch_size
@@ -147,15 +147,15 @@ class TEMPO(nn.Module):
             self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
             self.gpt2_trend_token = self.tokenizer(
                 text="Predict the future time step given the trend", return_tensors="pt"
-            ).to(device)
+            )
             self.gpt2_season_token = self.tokenizer(
                 text="Predict the future time step given the season",
                 return_tensors="pt",
-            ).to(device)
+            )
             self.gpt2_residual_token = self.tokenizer(
                 text="Predict the future time step given the residual",
                 return_tensors="pt",
-            ).to(device)
+            )
 
             self.token_len = len(self.gpt2_trend_token["input_ids"][0])
 
@@ -241,7 +241,7 @@ class TEMPO(nn.Module):
                 self.prompt_layer_season,
                 self.prompt_layer_noise,
             ):
-                layer.to(device=device)
+                # layer.to(device=device)
                 layer.train()
         else:
             self.out_layer_trend = nn.Linear(
@@ -283,19 +283,19 @@ class TEMPO(nn.Module):
             self.in_layer_noise,
             self.out_layer_noise,
         ):
-            layer.to(device=device)
+            # layer.to(device=device)
             layer.train()
 
         for layer in (self.map_trend, self.map_season, self.map_resid):
-            layer.to(device=device)
+            # layer.to(device=device)
             layer.train()
 
         self.cnt = 0
 
         self.num_nodes = configs.num_nodes
-        self.rev_in_trend = RevIn(num_features=self.num_nodes).to(device)
-        self.rev_in_season = RevIn(num_features=self.num_nodes).to(device)
-        self.rev_in_noise = RevIn(num_features=self.num_nodes).to(device)
+        self.rev_in_trend = RevIn(num_features=self.num_nodes)
+        self.rev_in_season = RevIn(num_features=self.num_nodes)
+        self.rev_in_noise = RevIn(num_features=self.num_nodes)
 
         self.loss_func = configs.loss_func
         if self.loss_func == "prob":
@@ -375,9 +375,7 @@ class TEMPO(nn.Module):
     def l2_normalize(self, x, dim=None, epsilon=1e-12):
         """Normalizes a given vector or matrix."""
         square_sum = torch.sum(x**2, dim=dim, keepdim=True)
-        x_inv_norm = torch.rsqrt(
-            torch.maximum(square_sum, torch.tensor(epsilon, device=x.device))
-        )
+        x_inv_norm = torch.rsqrt(torch.maximum(square_sum, torch.tensor(epsilon)))
         return x * x_inv_norm
 
     def select_prompt(self, summary, prompt_mask=None):
@@ -699,7 +697,7 @@ class TEMPO(nn.Module):
             ]
         else:
             # Pad with zeros at the beginning
-            padding = torch.zeros(B, pad_length, M, device=x.device)
+            padding = torch.zeros(B, pad_length, M)
             x_padded = torch.cat([padding, x], dim=1)
 
         return x_padded
@@ -722,16 +720,13 @@ class TEMPO(nn.Module):
         self.eval()
 
         # Set x's shape to [1, 336, 1]
-        x = torch.FloatTensor(x).unsqueeze(0).unsqueeze(2).to(self.device)
+        x = torch.FloatTensor(x).unsqueeze(0).unsqueeze(2)
 
         # Normalize x
         x = self.rev_in_trend(x, "norm")
 
         # Pad/truncate x so it has self.seq_len time steps
         x = self.set_to_target_length(x)
-
-        # Ensure x is on the same device as the model
-        x = x.to(self.device)
 
         # Compute predictions for future time steps
         with torch.no_grad():

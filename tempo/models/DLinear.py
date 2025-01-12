@@ -44,7 +44,7 @@ class DLinear(nn.Module):
     Decomposition-Linear
     """
 
-    def __init__(self, configs, device):
+    def __init__(self, configs, device=None):
         super(DLinear, self).__init__()
         self.seq_len = configs.seq_len
         self.pred_len = configs.pred_len

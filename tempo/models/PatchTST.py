@@ -148,7 +148,7 @@ class PatchTST(nn.Module):
     Vanilla Transformer with O(L^2) complexity
     """
 
-    def __init__(self, configs, device):
+    def __init__(self, configs, device=None):
         super(PatchTST, self).__init__()
 
         self.enc_in = configs.enc_in

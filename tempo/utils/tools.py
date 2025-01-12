@@ -97,11 +97,11 @@ class EarlyStopping:
         self.val_loss_min = np.Inf
         self.delta = delta
 
-    def __call__(self, val_loss, model, path):
+    def __call__(self, val_loss, model, path, accelerator):
         score = -val_loss
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(val_loss, model, path)
+            self.save_checkpoint(val_loss, model, path, accelerator)
         elif score < self.best_score + self.delta:
             self.counter += 1
             print(
@@ -111,15 +111,22 @@ class EarlyStopping:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(val_loss, model, path)
+            self.save_checkpoint(val_loss, model, path, accelerator)
             self.counter = 0
 
-    def save_checkpoint(self, val_loss, model, path):
+    def save_checkpoint(self, val_loss, model, path, accelerator):
+        if not accelerator.is_main_process:
+            return
+
         if self.verbose:
             print(
                 f"Val loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}). Saving model to {path}..."
             )
-        torch.save(model.state_dict(), path + "/" + "checkpoint.pth")
+        # Unwrap model
+        unwrapped_model = accelerator.unwrap_model(model)
+
+        # Save state dictionary
+        torch.save(unwrapped_model.state_dict(), path + "/" + "checkpoint.pth")
         self.val_loss_min = val_loss
 
 
@@ -381,7 +388,7 @@ def convert_tsf_to_dataframe(
         )
 
 
-def vali(model, vali_data, vali_loader, criterion, args, device, itr):
+def vali(model, vali_data, vali_loader, criterion, args, itr):
     total_loss = []
     if (
         args.model == "PatchTST"
@@ -421,11 +428,11 @@ def vali(model, vali_data, vali_loader, criterion, args, device, itr):
                 data[2],
                 data[3],
             )
-            batch_x = batch_x.float().to(device)
+            batch_x = batch_x.float()
             batch_y = batch_y.float()
 
-            batch_x_mark = batch_x_mark.float().to(device)
-            batch_y_mark = batch_y_mark.float().to(device)
+            batch_x_mark = batch_x_mark.float()
+            batch_y_mark = batch_y_mark.float()
 
             if (
                 args.model == "GPT4TS_multi"
@@ -433,9 +440,9 @@ def vali(model, vali_data, vali_loader, criterion, args, device, itr):
                 or "TEMPO" in args.model
             ):
                 seq_trend, seq_seasonal, seq_resid = data[4], data[5], data[6]
-                seq_trend = seq_trend.float().to(device)
-                seq_seasonal = seq_seasonal.float().to(device)
-                seq_resid = seq_resid.float().to(device)
+                seq_trend = seq_trend.float()
+                seq_seasonal = seq_seasonal.float()
+                seq_resid = seq_resid.float()
                 outputs, _ = model(batch_x, itr, seq_trend, seq_seasonal, seq_resid)
             elif (
                 "former" in args.model
@@ -444,22 +451,20 @@ def vali(model, vali_data, vali_loader, criterion, args, device, itr):
                 or args.model == "LightTS"
             ):
                 dec_inp = torch.zeros_like(batch_y[:, -args.pred_len :, :]).float()
-                dec_inp = (
-                    torch.cat([batch_y[:, : args.label_len, :], dec_inp], dim=1)
-                    .float()
-                    .to(device)
-                )
+                dec_inp = torch.cat(
+                    [batch_y[:, : args.label_len, :], dec_inp], dim=1
+                ).float()
                 outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
             else:
                 outputs = model(batch_x, itr)
 
             # encoder - decoder
             if args.loss_func == "prob" or args.loss_func == "negative_binomial":
-                batch_y = batch_y[:, -args.pred_len :, :].to(device)
+                batch_y = batch_y[:, -args.pred_len :, :]
                 loss = criterion(batch_y, outputs)
             else:
                 outputs = outputs[:, -args.pred_len :, :]
-                batch_y = batch_y[:, -args.pred_len :, :].to(device)
+                batch_y = batch_y[:, -args.pred_len :, :]
 
                 pred = outputs.detach().cpu()
                 true = batch_y.detach().cpu()

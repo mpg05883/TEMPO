@@ -350,10 +350,10 @@ def get_checkpoint(loss_func: str):
         str: File path to trained model's checkpoint
     """
     # Directory where checkpoints are stored
-    checkpoints_dir = "checkpoints"
+    checkpoints_directory = "checkpoints"
 
-    # Path to checkpoints_dir (./checkpoints)
-    checkpoints_dir_path = os.path.join(checkpoints_dir, "Monash_1")
+    # Path to checkpoints_directory (./checkpoints)
+    checkpoints_directory_path = os.path.join(checkpoints_directory, "Monash_1")
 
     """
     If loss func is "mse", then get deterministic model's directory. Else, get
@@ -365,7 +365,7 @@ def get_checkpoint(loss_func: str):
     model_dir = f"Demo_Monash_TEMPO{is_prob}6_prompt_learn_336_96_100_sl336_ll0_pl96_dm768_nh4_el3_gl6_df768_ebtimeF_itr0"
 
     # Path to model_dir (./checkpoints/model_dir)
-    model_dir_path = os.path.join(checkpoints_dir_path, model_dir)
+    model_dir_path = os.path.join(checkpoints_directory_path, model_dir)
 
     # Name of checkpoint file in model_dir
     checkpoint_file = "checkpoint.pth"
@@ -656,7 +656,7 @@ bash ./scripts/monash_demo.sh
 """
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Trains and evaluates model on time series forecasting"
+        description="Trains and evaluates model for time series forecasting"
     )
 
     parser.add_argument(
@@ -666,30 +666,30 @@ if __name__ == "__main__":
     )
 
     # Directory where all model checkpoints are stored
-    checkpoints_dir = "checkpoints"
+    checkpoints_directory = "checkpoints"
 
-    # Create checkpoints directory if it doesn't exist
-    if not os.path.exists(checkpoints_dir):
-        os.makedirs(checkpoints_dir)
+    # Create `checkpoints` if it doesn't exist
+    if not os.path.exists(checkpoints_directory):
+        os.makedirs(checkpoints_directory)
 
     # Create default directory to save model
     default_dir = "default"
 
-    # Create path to default directory
-    default_dir_path = os.path.join(checkpoints_dir, default_dir)
+    # Create path to `default`
+    default_checkpoints_path = os.path.join(checkpoints_directory, default_dir)
 
     parser.add_argument(
         "--checkpoints",
         type=str,
-        default=default_dir_path,
-        help="Directory path where model's checkpoints will be saved",
+        default=default_checkpoints_path,
+        help="Path to directory where model's checkpoints will be saved",
     )
     parser.add_argument(
         "--task_name",
         type=str,
         choices=["long_term_forecast"],
         default="long_term_forecast",
-        help="Task that model will be trained and evaluated on",
+        help="Task the model will be trained and evaluated for",
     )
     parser.add_argument(
         "--prompt",
@@ -700,6 +700,7 @@ if __name__ == "__main__":
         "--num_nodes",
         type=int,
         default=1,
+        help="",  # ? number of machines to use?
     )
     parser.add_argument(
         "--seq_len",
@@ -722,12 +723,13 @@ if __name__ == "__main__":
         "--decay_fac",
         type=float,
         default=0.9,
+        help="",  # ? decay factor for learning rate?
     )
     parser.add_argument(
         "--learning_rate",
         type=float,
         default=1e-3,
-        help="Learning rate to use during training",
+        help="Initial learning rate to use during training",
     )
     parser.add_argument(
         "--batch_size",
@@ -739,12 +741,13 @@ if __name__ == "__main__":
         "--num_workers",
         type=int,
         default=0,
+        help="",  # ? number of subprocesses to use for data loading?
     )
     parser.add_argument(
         "--train_epochs",
         type=int,
         default=1,
-        help="Number of epochs to use during traiing",
+        help="Number of epochs to model will be trained for",
     )
     parser.add_argument(
         "--lradj",
@@ -817,7 +820,8 @@ if __name__ == "__main__":
         type=str,
         choices=["mse", "prob", "negative_binomial"],
         default="mse",
-        help='Loss function to minimize during training. Set to "mse" for deterministic forecasting',
+        help='Loss function to minimize during training. Set to "mse" for'
+        "deterministic forecasting",
     )
     parser.add_argument(
         "--pretrain",
@@ -834,7 +838,7 @@ if __name__ == "__main__":
         type=str,
         choices=["DLinear", "TEMPO", "T5", "ETSformer"],
         default="TEMPO",
-        help="Model architecture that'll be trained and evaluated",
+        help="Model architecture",
     )
     parser.add_argument(
         "--stride",
@@ -891,19 +895,19 @@ if __name__ == "__main__":
     )
 
     # Directory where all configurations are stored
-    configs_dir = "configs"
+    configs_directory = "configs"
 
     # Name of default configuration
     default_config = "run_TEMPO.yml"
 
     # Create file path to configuration
-    default_config_path = os.path.join(configs_dir, default_config)
+    default_config_path = os.path.join(configs_directory, default_config)
 
     parser.add_argument(
         "--config_path",
         type=str,
         default=default_config_path,
-        help="Path to configuration file to use during training and evaluation",
+        help="Path to configuration file",
     )
     parser.add_argument(
         "--datasets",
@@ -950,22 +954,23 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--print_args_and_config",
-        type=bool,
-        default=False,
-        help="Set to True to print command line arguments and configuration",
+        action="store_true",
+        help="If passed, will print command line arguments and configuration",
     )
     parser.add_argument(
         "--get_checkpoint",
-        type=bool,
-        default=True,
-        help="Set to True to skip training and evaluate a trained model",
+        action="store_true",
+        help="If passed, will load trained model and evaluate it. Will load "
+        'deterministic model if --loss_func is set to "mse". Otherwise, '
+        "probabilstic model will be loaded",
     )
     parser.add_argument(
         "--read_values",
-        type=bool,
-        default=True,
-        help="Set to True to read predicted and true values from .csv file",
+        action="store_true",
+        help="If passed, will evaluate predicted and true values from .csv file. "
+        "Will load predicted values from determinsitic model if --loss_func is "
+        'set to "mse". Otherwise, predicted values from probabilstic model will '
+        "be loaded",
     )
-
     args = parser.parse_args()
     main(args)
