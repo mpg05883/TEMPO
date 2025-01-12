@@ -7,10 +7,14 @@ import time
 import numpy as np
 import torch
 import torch.distributions as dist
+import torch.multiprocessing as mp
 import torch.nn as nn
 from numpy.random import choice
 from omegaconf import OmegaConf
+from torch.distributed import destroy_process_group, init_process_group
+from torch.nn.parallel import DistributedSampler as DDP
 from torch.utils.data import Subset
+from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from smape import SMAPE
@@ -39,6 +43,23 @@ SEASONALITY_MAP = {
     "quarterly": 4,
     "yearly": 1,
 }
+
+
+def ddp_setup(rank, world_size):
+    """
+    Args:
+        rank: Unique identifier of each process
+        world_size: Total number of processes
+    """
+    # IP address of machine that's running the rank 0 process
+    os.environ["MASTER_ADDR"] = "localhost"
+
+    # use any free port
+    os.environ["MASTER_PORT"] = "12355"
+    torch.cuda.set_device(rank)
+
+    # initialize distributed process group
+    init_process_group(backend="nccl", rank=rank, world_size=world_size)
 
 
 def print_args_and_config(args, config):
@@ -91,6 +112,7 @@ def print_dataset_info(data, loader, name="Dataset"):
             print(f"- {attr}: {getattr(data, attr)}")
 
 
+# TODO: if using distribute computing, pass distributed sampler and set shuffle to False
 def prepare_data_loaders(args, config):
     """
     Prepare train, validation and test data loaders.
@@ -418,6 +440,12 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
     else:
         model = GPT4TS(args, device)
 
+    # TODO: wrap model with
+
+    # TODO: when saving model, unwrap it from DDP before saving
+
+    # TODO: when saving mode, only save on rank 0 process
+
     model.to(device)
 
     # Specify loss function
@@ -572,8 +600,9 @@ def train_model(args, device, train_loader, vali_data, vali_loader, iteration):
     return model
 
 
-# TODO: parallelize training and evaluation script
 def main(args):
+    # TODO: call ddp setup
+
     start_time = time.time()
 
     # Load configuration
@@ -602,6 +631,8 @@ def main(args):
         if args.get_checkpoint:
             # Initialize TEMPO model
             model = TEMPO(args, device)
+
+            # TODO: wrap model with DDP
 
             # Get trained model's checkpoint
             checkpoint_file_path = get_checkpoint(args.loss_func)
@@ -643,6 +674,8 @@ def main(args):
     total_time_elapsed_min = np.abs((time.time() - start_time) / 60)
     print(f"\nFinished! Total time elapsed: {total_time_elapsed_min:.0f} minutes\n")
 
+    # TODO: call destroy process group
+
 
 """
 To run probabilstic forecasting script, use the following command:
@@ -650,6 +683,12 @@ bash ./scripts/monash_prob_demo.sh
 
 To run deterministic forecasting script, use the following command:
 bash ./scripts/monash_demo.sh
+
+To run parallel probabilstic forecasting script, use the following command:
+bash ./scripts/monash_prob_demo_parallel.sh
+
+To run parallel deterministic forecasting script, use the following command:
+bash ./scripts/monash_demo_parallel.sh
 
 ! I think something's wrong with the version of PyTorch in the Conda env bc
 ! I can't use any GPUs with it
@@ -697,12 +736,6 @@ if __name__ == "__main__":
         default=0,
     )
     parser.add_argument(
-        "--num_nodes",
-        type=int,
-        default=1,
-        help="",  # ? number of machines to use?
-    )
-    parser.add_argument(
         "--seq_len",
         type=int,
         default=512,
@@ -736,12 +769,6 @@ if __name__ == "__main__":
         type=int,
         default=128,
         help="Batch size to use during training",
-    )
-    parser.add_argument(
-        "--num_workers",
-        type=int,
-        default=0,
-        help="",  # ? number of subprocesses to use for data loading?
     )
     parser.add_argument(
         "--train_epochs",
@@ -972,5 +999,20 @@ if __name__ == "__main__":
         'set to "mse". Otherwise, predicted values from probabilstic model will '
         "be loaded",
     )
+
+    # old distribute arguments
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=0,
+        help="",  # ? number of subprocesses to use for data loading?
+    )
+    # parser.add_argument(
+    #     "--num_nodes",
+    #     type=int,
+    #     default=1,
+    #     help="",  # ? number of machines to use?
+    # )
+
     args = parser.parse_args()
     main(args)
