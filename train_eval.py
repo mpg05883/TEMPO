@@ -1024,18 +1024,5 @@ if __name__ == "__main__":
         ' is set to "mse". Otherwise, probabilistic model\'s predicted values'
         " will be loaded",
     )
-    # # old distribute arguments
-    # parser.add_argument(
-    #     "--num_workers",
-    #     type=int,
-    #     default=0,
-    #     help="",  # ? number of subprocesses to use for data loading?
-    # )
-    # parser.add_argument(
-    #     "--num_nodes",
-    #     type=int,
-    #     default=1,
-    #     help="",  # ? number of machines to use?
-    # )
     args = parser.parse_args()
     main(args)
