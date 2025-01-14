@@ -61,12 +61,13 @@ def data_provider(args, flag, drop_last_test=True, train_all=False):
         train_all=train_all,
         data_name=args.data_name,
     )
+    sampler = DistributedSampler(data_set)
     data_loader = DataLoader(
         data_set,
         batch_size=batch_size,
         shuffle=False,
         num_workers=args.num_workers,
         drop_last=drop_last,
-        sampler=DistributedSampler(data_set),
+        sampler=sampler,
     )
     return data_set, data_loader

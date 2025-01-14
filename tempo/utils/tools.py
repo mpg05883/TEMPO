@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
+import torch.distributions as dist
 from huggingface_hub import hf_hub_download
 
 # import torch.nn as nn
@@ -390,6 +391,7 @@ def convert_tsf_to_dataframe(
 
 def vali(model, vali_data, vali_loader, criterion, args, itr):
     total_loss = []
+
     if (
         args.model == "PatchTST"
         or args.model == "DLinear"
@@ -420,19 +422,21 @@ def vali(model, vali_data, vali_loader, criterion, args, itr):
         model.eval()
 
     with torch.no_grad():
-        for i, data in tqdm(enumerate(vali_loader)):
-
+        is_not_master_process = dist.get_rank() != 0
+        for i, data in tqdm(enumerate(vali_loader), disable=is_not_master_process):
             batch_x, batch_y, batch_x_mark, batch_y_mark = (
                 data[0],
                 data[1],
                 data[2],
                 data[3],
             )
-            batch_x = batch_x.float()
-            batch_y = batch_y.float()
 
-            batch_x_mark = batch_x_mark.float()
-            batch_y_mark = batch_y_mark.float()
+            # TODO: move to device
+            batch_x = batch_x.float().to(model.rank)
+            batch_y = batch_y.float().to(model.rank)
+
+            batch_x_mark = batch_x_mark.float().to(model.rank)
+            batch_y_mark = batch_y_mark.float().to(model.rank)
 
             if (
                 args.model == "GPT4TS_multi"
@@ -440,9 +444,9 @@ def vali(model, vali_data, vali_loader, criterion, args, itr):
                 or "TEMPO" in args.model
             ):
                 seq_trend, seq_seasonal, seq_resid = data[4], data[5], data[6]
-                seq_trend = seq_trend.float()
-                seq_seasonal = seq_seasonal.float()
-                seq_resid = seq_resid.float()
+                seq_trend = seq_trend.float().to(model.rank)
+                seq_seasonal = seq_seasonal.float().to(model.rank)
+                seq_resid = seq_resid.float().to(model.rank)
                 outputs, _ = model(batch_x, itr, seq_trend, seq_seasonal, seq_resid)
             elif (
                 "former" in args.model
@@ -450,10 +454,16 @@ def vali(model, vali_data, vali_loader, criterion, args, itr):
                 or args.model == "TimesNet"
                 or args.model == "LightTS"
             ):
-                dec_inp = torch.zeros_like(batch_y[:, -args.pred_len :, :]).float()
-                dec_inp = torch.cat(
-                    [batch_y[:, : args.label_len, :], dec_inp], dim=1
-                ).float()
+                dec_inp = (
+                    torch.zeros_like(batch_y[:, -args.pred_len :, :])
+                    .float()
+                    .to(model.rank)
+                )
+                dec_inp = (
+                    torch.cat([batch_y[:, : args.label_len, :], dec_inp], dim=1)
+                    .float()
+                    .to(model.rank)
+                )
                 outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
             else:
                 outputs = model(batch_x, itr)
@@ -472,6 +482,8 @@ def vali(model, vali_data, vali_loader, criterion, args, itr):
                 loss = criterion(pred, true)
 
             total_loss.append(loss.cpu().numpy())
+
+    # TODO: use dist.all_reduce to compute average
     total_loss = np.average(total_loss)
     if (
         args.model == "PatchTST"
@@ -594,14 +606,14 @@ def test(
                 data[6],  # Residual component
             )
 
-            batch_x = batch_x.float().to(device)
-            batch_x_mark = batch_x_mark.float().to(device)
-            batch_y_mark = batch_y_mark.float().to(device)
-            batch_y = batch_y.float()
+            batch_x = batch_x.float().to(model.rank).to(device)
+            batch_x_mark = batch_x_mark.float().to(model.rank).to(device)
+            batch_y_mark = batch_y_mark.float().to(model.rank).to(device)
+            batch_y = batch_y.float().to(model.rank)
 
-            seq_trend = seq_trend.float().to(device)
-            seq_seasonal = seq_seasonal.float().to(device)
-            seq_resid = seq_resid.float().to(device)
+            seq_trend = seq_trend.float().to(model.rank).to(device)
+            seq_seasonal = seq_seasonal.float().to(model.rank).to(device)
+            seq_resid = seq_resid.float().to(model.rank).to(device)
 
             # Compute forward pass
             if (
@@ -622,11 +634,16 @@ def test(
                 or args.model == "TimesNet"
                 or args.model == "LightTS"
             ):
-                dec_inp = torch.zeros_like(batch_y[:, -args.pred_len :, :]).float()
+                dec_inp = (
+                    torch.zeros_like(batch_y[:, -args.pred_len :, :])
+                    .float()
+                    .to(model.rank)
+                )
 
                 dec_inp = (
                     torch.cat([batch_y[:, : args.label_len, :], dec_inp], dim=1)
                     .float()
+                    .to(model.rank)
                     .to(device)
                 )
 
@@ -782,14 +799,14 @@ def test_probs(
                 data[6],  # Residual component
             )
 
-            batch_x = batch_x.float().to(device)
-            batch_x_mark = batch_x_mark.float().to(device)
-            batch_y_mark = batch_y_mark.float().to(device)
-            batch_y = batch_y.float()
+            batch_x = batch_x.float().to(model.rank).to(device)
+            batch_x_mark = batch_x_mark.float().to(model.rank).to(device)
+            batch_y_mark = batch_y_mark.float().to(model.rank).to(device)
+            batch_y = batch_y.float().to(model.rank)
 
-            seq_trend = seq_trend.float().to(device)
-            seq_seasonal = seq_seasonal.float().to(device)
-            seq_resid = seq_resid.float().to(device)
+            seq_trend = seq_trend.float().to(model.rank).to(device)
+            seq_seasonal = seq_seasonal.float().to(model.rank).to(device)
+            seq_resid = seq_resid.float().to(model.rank).to(device)
 
             # Compute channel-wise predictions
             for channel in range(batch_x.shape[-1]):

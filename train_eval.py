@@ -453,13 +453,10 @@ def train(model, args, rank, train_loader, vali_data, vali_loader, iteration):
     # Specify loss function
     criterion = get_criterion(loss_func=args.loss_func)
 
-    # Initialize optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
-    # Initialize early stopping
     early_stopping = EarlyStopping(patience=args.patience, verbose=True)
 
-    # Initialize scheduler
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=args.tmax,
@@ -574,10 +571,20 @@ def train(model, args, rank, train_loader, vali_data, vali_loader, iteration):
         # Print update after finishing current epoch
         # print_epoch_time(epoch_start_time)
 
-        # TODO: paralleize the rest of this
         # Compute current epoch's average training loss
-        train_loss = np.average(train_loss)
+        train_loss = torch.tensor(
+            train_loss,
+            dtype=torch.float32,
+            device=f'cuda"{rank}',
+        )
 
+        dist.all_reduce(train_loss, op=dist.ReduceOp.SUM)
+
+        train_loss /= dist.get_world_size()
+
+        train_loss = train_loss.item()
+
+        # TODO: paralleize validation loss calculation
         # Compute current epoch's validation loss
         vali_loss = vali(
             model,
@@ -655,7 +662,6 @@ def train_eval(args, config, rank):
             model.module.load_state_dict(checkpoint, strict=False)
         else:
             print_rank_0("\nStarting training procedure...")
-
             model = train(
                 model,
                 args,
@@ -713,16 +719,16 @@ def main(args):
 
 
 """
-To run probabilstic forecasting script, use the following command:
+Probabilstic forecasting script:
 bash ./scripts/monash_prob_demo.sh
 
-To run deterministic forecasting script, use the following command:
+Deterministic forecasting script:
 bash ./scripts/monash_demo.sh
 
-To run parallel probabilstic forecasting script, use the following command:
+Parallel probabilstic forecasting script:
 bash ./scripts/monash_prob_demo_parallel.sh
 
-To run parallel deterministic forecasting script, use the following command:
+Parallel deterministic forecasting script:
 bash ./scripts/monash_demo_parallel.sh
 
 ! I think something's wrong with the version of PyTorch in the Conda env bc
@@ -732,28 +738,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Trains and evaluates model for time series forecasting"
     )
-
     parser.add_argument(
         "--model_id",
         type=str,
         default="weather_GTP4TS_multi-debug",
     )
 
-    # Create `checkpoints` if it doesn't exist
     if not os.path.exists(CHECKPOINTS_DIRECTORY):
         os.makedirs(CHECKPOINTS_DIRECTORY)
-
-    # Create default directory to save model
-    default_dir = "default"
-
-    # Create path to `default`
-    default_checkpoints_path = os.path.join(CHECKPOINTS_DIRECTORY, default_dir)
 
     parser.add_argument(
         "--checkpoints",
         type=str,
-        default=default_checkpoints_path,
-        help="Path to directory where model's checkpoints will be saved",
+        default=CHECKPOINTS_DIRECTORY,
+        help="Path to `checkpoints` directory",
     )
     parser.add_argument(
         "--task_name",
@@ -806,7 +804,7 @@ if __name__ == "__main__":
         "--train_epochs",
         type=int,
         default=1,
-        help="Number of epochs to model will be trained for",
+        help="Number of epochs to use during training",
     )
     parser.add_argument(
         "--lradj",
@@ -953,19 +951,14 @@ if __name__ == "__main__":
         default=0.01,
     )
 
-    # Directory where all configurations are stored
     configs_directory = "configs"
-
-    # Name of default configuration
-    default_config = "run_TEMPO.yml"
-
-    # Create file path to configuration
-    default_config_path = os.path.join(configs_directory, default_config)
+    tempo_config = "run_TEMPO.yml"
+    tempo_config_path = os.path.join(configs_directory, tempo_config)
 
     parser.add_argument(
         "--config_path",
         type=str,
-        default=default_config_path,
+        default=tempo_config_path,
         help="Path to configuration file",
     )
     parser.add_argument(
@@ -1019,32 +1012,30 @@ if __name__ == "__main__":
     parser.add_argument(
         "--get_checkpoint",
         action="store_true",
-        help="If passed, will load trained model and evaluate it. Will load "
-        'deterministic model if --loss_func is set to "mse". Otherwise, '
-        "probabilstic model will be loaded",
+        help="If passed, will load trained model and evaluate it. Deterministic"
+        ' model will be loaded if --loss_func is set to "mse". Otherwise,'
+        " probabilstic model will be loaded",
     )
     parser.add_argument(
         "--read_values",
         action="store_true",
-        help="If passed, will evaluate predicted and true values from .csv file. "
-        "Will load predicted values from determinsitic model if --loss_func is "
-        'set to "mse". Otherwise, predicted values from probabilstic model will '
-        "be loaded",
+        help="If passed, will evaluate predicted and true values from .csv file."
+        " Determinsitic model's predicted values will be loaded if --loss_func"
+        ' is set to "mse". Otherwise, probabilistic model\'s predicted values'
+        " will be loaded",
     )
-
-    # old distribute arguments
-    parser.add_argument(
-        "--num_workers",
-        type=int,
-        default=0,
-        help="",  # ? number of subprocesses to use for data loading?
-    )
-    parser.add_argument(
-        "--num_nodes",
-        type=int,
-        default=1,
-        help="",  # ? number of machines to use?
-    )
-
+    # # old distribute arguments
+    # parser.add_argument(
+    #     "--num_workers",
+    #     type=int,
+    #     default=0,
+    #     help="",  # ? number of subprocesses to use for data loading?
+    # )
+    # parser.add_argument(
+    #     "--num_nodes",
+    #     type=int,
+    #     default=1,
+    #     help="",  # ? number of machines to use?
+    # )
     args = parser.parse_args()
     main(args)
