@@ -62,7 +62,7 @@ echo -e "$log_path"
 # --standalone: single node setup
 # --nodes: number of nodes (i.e. machines)
 # --nproc_per_node: number of processes per gpu (usually, we assign one process per gpu)
-torchrun --standalone --nodes=1 --nproc_per_node=gpu train_eval.py \
+torchrun --standalone --nproc_per_node=gpu train_eval.py \
     --datasets ETTh2 \
     --eval_data ETTm1 \
     --target_data ETTh2 \

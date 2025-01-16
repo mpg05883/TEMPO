@@ -721,6 +721,9 @@ def main(args):
     # Number of processes across all nodes
     world_size = get_world_size()
 
+    num_gpus = torch.cuda.device_count()
+    print(f"Number of GPUs available: {num_gpus}")
+
     start_time = time.time()
 
     # Run training and evaluation loops
