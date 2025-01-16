@@ -471,7 +471,6 @@ def train(
         num_samples = 0
 
         train_loader.sampler.set_epoch(epoch)
-        vali_loader.sampler.set_epoch(epoch)
 
         # Only display progress bar on global rank 0 process
         if is_main_node:
@@ -579,6 +578,7 @@ def train(
             criterion,
             args,
             iteration,
+            epoch,
         )
 
         # Print current epoch's training and validation loss across all processes
@@ -667,8 +667,8 @@ def train_eval(args, config, local_rank, global_rank, world_size):
                 i,
             )
 
+        # Wait for all processes before evaluating model
         barrier()
-        # TODO: parallelize evaluation code once you've parallelized training code
         print_rank_0("\n========== Evaluating Model ==========")
         """
         If loss function is set to "mse", then (value_1, value_2) will be
@@ -682,7 +682,7 @@ def train_eval(args, config, local_rank, global_rank, world_size):
             args,
             local_rank,
             global_rank,
-            get_world_size(),
+            world_size,
             i,
             read_values=args.read_values,
         )

@@ -12,6 +12,7 @@ from torch.distributed import all_gather
 
 # import torch.nn as nn
 from torch.distributions import NegativeBinomial
+from torchmetrics import MeanAbsoluteError, MeanSquaredError
 from tqdm import tqdm
 
 from tempo.utils.imputation_metrics import (  # mae_withmask,; mse_withmask,
@@ -400,6 +401,7 @@ def vali(
     criterion,
     args,
     itr,
+    epoch,
 ):
     total_vali_loss = 0.0  # Total validation loss on this process only
     num_samples = 0
@@ -434,6 +436,8 @@ def vali(
         model.eval()
 
     with torch.no_grad():
+        vali_loader.sampler.set_epoch(epoch)
+
         is_main_node = global_rank == 0
         if is_main_node:
             pbar = tqdm(len(vali_loader))
@@ -581,7 +585,9 @@ def test(
         model: Model that'll be computing the probabilistic forecasts
         test_loader: Dataloader for test set
         args: Command line arguments
-        device: Device to run model on
+        local_rank: Unique identifier on local node
+        global_rank: Unique identifier across all nodes
+        world_size: Number of processes across all nodes
         iteration: Iteration number of training and inference loop
         plot (bool): Set to True to create plot of predicted values vs true
         values. Defaults to True.
@@ -606,9 +612,12 @@ def test(
             read_values=read_values,
         )
 
-    results_file_path = f"./results/{values_file}"
     is_main_node = global_rank == 0
     if read_values and is_main_node:
+        # Get file path to .csv file
+        results_directory = "results"
+        results_file_path = os.path.join(results_directory, values_file)
+
         # Load values from .csv file
         df = pd.read_csv(results_file_path)
         y_pred = df["pred"].to_numpy()
@@ -621,13 +630,16 @@ def test(
             file_name="test_det.png",
         )
 
-    preds = []
-    trues = []
+    preds = torch.tensor([], dtype=torch.float32)
+    trues = torch.tensor([], dtype=torch.float32)
     total_mae = 0.0
     total_mse = 0.0
     num_samples = 0
 
     model.eval()  # Set to evlauation mode
+
+    mse = MeanSquaredError()
+    mae = MeanAbsoluteError()
 
     with torch.no_grad():
         test_loader.sampler.set_epoch(iteration)
@@ -649,11 +661,11 @@ def test(
                 data[6],  # Residual component
             )
 
+            # Move tensors to GPU
             batch_x = batch_x.float().to(local_rank)
             batch_x_mark = batch_x_mark.float().to(local_rank)
             batch_y_mark = batch_y_mark.float().to(local_rank)
             batch_y = batch_y.float().to(local_rank)
-
             seq_trend = seq_trend.float().to(local_rank)
             seq_seasonal = seq_seasonal.float().to(local_rank)
             seq_resid = seq_resid.float().to(local_rank)
@@ -697,29 +709,32 @@ def test(
             batch_y = batch_y[:, -args.pred_len :, :]
 
             # Save predicted values
-            pred = outputs.detach().cpu().numpy().astype(np.float16)
-            preds.append(pred)
+            y_pred = outputs.detach()
+            preds = torch.cat((preds, y_pred))
 
             # Save true values
-            true = batch_y.detach().cpu().numpy().astype(np.float16)
-            trues.append(true)
+            y_true = batch_y.detach()
+            trues = torch.cat((trues, y_true))
 
             torch.cuda.empty_cache()
 
             # Calculate batch errors
-            batch_mae, batch_mse = metric_mae_mse(pred, true)
+            batch_mae = mae(y_pred, y_true)
+            batch_mse = mse(y_pred, y_true)
 
             # Update the total errors (assuming batch_x.size(0) is batch size)
-            batch_size = batch_x.size(0)
+            batch_size = batch_y.size(0)
             total_mae += batch_mae * batch_size
             total_mse += batch_mse * batch_size
             num_samples += batch_size
 
             torch.cuda.empty_cache()
 
+            # Update progress bar
             if is_main_node:
                 pbar.update(1)
 
+    # Outside for loop
     if is_main_node:
         pbar.close()
 
@@ -742,21 +757,23 @@ def test(
             file_name="test_det.png",
         )
 
-    local_mae = total_mae / num_samples
-    local_mae_tensor = torch.tensor(local_mae, dtype=torch.float32, device=local_rank)
-    tensor_list = [torch.zeros(1, device=local_rank) for _ in range(world_size)]
-    all_gather(tensor_list, local_mae_tensor)
-    stacked_tensor = torch.stack(tensor_list)
-    aggregated_mae = torch.mean(stacked_tensor)
+    # Get aggregated average MAE across all processes
+    aggregated_average_mae = aggregate_metric(
+        total_mae,
+        num_samples,
+        local_rank,
+        world_size,
+    )
 
-    local_mse = total_mse / num_samples
-    local_mse_tensor = torch.tensor(local_mse, dtype=torch.float32, device=local_rank)
-    tensor_list = [torch.zeros(1, device=local_rank) for _ in range(world_size)]
-    all_gather(tensor_list, local_mse_tensor)
-    stacked_tensor = torch.stack(tensor_list)
-    aggregated_mse = torch.mean(stacked_tensor)
+    # Get aggregated average MSE across all processes
+    aggregated_average_mse = aggregate_metric(
+        total_mse,
+        num_samples,
+        local_rank,
+        world_size,
+    )
 
-    return aggregated_mae, aggregated_mse
+    return aggregated_average_mae, aggregated_average_mse
 
 
 def sample_negative_binomial(mu, alpha, num_samples=1):
@@ -809,7 +826,9 @@ def test_probs(
         test_data: Test dataset
         test_loader: Dataloader for the test dataset
         args: Command line arguments
-        device: Device to run the model on
+        local_rank: Unique identifier on local node
+        global_rank: Unique identifier across all nodes
+        world_size: Number of processes across all nodes
         plot (bool): Set to True to create plot of predicted values vs true
         values. Defaults to True.
         read_values (bool): Set to True to read predicted and true values from
