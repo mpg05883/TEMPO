@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-import torch.distributions as dist
 from huggingface_hub import hf_hub_download
+from torch.distributed import all_gather
 
 # import torch.nn as nn
 from torch.distributions import NegativeBinomial
@@ -97,16 +97,16 @@ class EarlyStopping:
         self.early_stop = False
         self.val_loss_min = np.Inf
         self.delta = delta
-        self.rank
+        self.local_rank
 
-    def __call__(self, val_loss, model, path, accelerator):
+    def __call__(self, val_loss, model, path, global_rank):
         score = -val_loss
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(val_loss, model, path, accelerator)
+            self.save_checkpoint(val_loss, model, path, global_rank)
         elif score < self.best_score + self.delta:
             self.counter += 1
-            if model.rank == 0:
+            if global_rank == 0:
                 print(
                     f"No decrease in val loss. EarlyStopping counter: {self.counter} out of {self.patience}"
                 )
@@ -114,14 +114,14 @@ class EarlyStopping:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(val_loss, model, path, accelerator)
+            self.save_checkpoint(val_loss, model, path, global_rank)
             self.counter = 0
 
-    def save_checkpoint(self, val_loss, model, path, accelerator):
-        if not accelerator.is_main_process:
+    def save_checkpoint(self, val_loss, model, path, global_rank):
+        if global_rank != 0:
             return
 
-        if self.verbose and model.rank == 0:
+        if self.verbose:
             print(
                 f"Val loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}). Saving model to {path}..."
             )
@@ -142,11 +142,11 @@ class EarlyStopping_dist:
         self.delta = delta
         # self.dist = dist
 
-    def __call__(self, val_loss, model, path, rank=0):
+    def __call__(self, val_loss, model, path, local_rank):
         score = -val_loss
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(val_loss, model, path, rank)
+            self.save_checkpoint(val_loss, model, path, local_rank)
         elif score < self.best_score + self.delta:
             self.counter += 1
             print(f"EarlyStopping counter: {self.counter} out of {self.patience}")
@@ -154,15 +154,15 @@ class EarlyStopping_dist:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(val_loss, model, path, rank)
+            self.save_checkpoint(val_loss, model, path, local_rank)
             self.counter = 0
 
-    def save_checkpoint(self, val_loss, model, path, rank=0):
+    def save_checkpoint(self, val_loss, model, path, local_rank=0):
         if self.verbose:
             print(
                 f"Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ..."
             )
-        if rank == 0:
+        if local_rank == 0:
             if isinstance(model, torch.nn.parallel.DistributedDataParallel):
                 torch.save(model.module.state_dict(), path + "/" + "checkpoint.pth")
             else:
@@ -389,8 +389,19 @@ def convert_tsf_to_dataframe(
         )
 
 
-def vali(model, vali_data, vali_loader, criterion, args, itr):
-    total_loss = []
+def vali(
+    model,
+    local_rank,
+    global_rank,
+    world_size,
+    vali_data,
+    vali_loader,
+    criterion,
+    args,
+    itr,
+):
+    total_loss = 0.0
+    num_samples = 0
 
     if (
         args.model == "PatchTST"
@@ -422,8 +433,11 @@ def vali(model, vali_data, vali_loader, criterion, args, itr):
         model.eval()
 
     with torch.no_grad():
-        is_not_master_process = dist.get_rank() != 0
-        for i, data in tqdm(enumerate(vali_loader), disable=is_not_master_process):
+        is_main_node = global_rank == 0
+        if is_main_node:
+            pbar = tqdm(len(vali_loader))
+
+        for i, data in enumerate(vali_loader):
             batch_x, batch_y, batch_x_mark, batch_y_mark = (
                 data[0],
                 data[1],
@@ -431,12 +445,11 @@ def vali(model, vali_data, vali_loader, criterion, args, itr):
                 data[3],
             )
 
-            # TODO: move to device
-            batch_x = batch_x.float().to(model.rank)
-            batch_y = batch_y.float().to(model.rank)
+            batch_x = batch_x.float().to(local_rank)
+            batch_y = batch_y.float().to(local_rank)
 
-            batch_x_mark = batch_x_mark.float().to(model.rank)
-            batch_y_mark = batch_y_mark.float().to(model.rank)
+            batch_x_mark = batch_x_mark.float().to(local_rank)
+            batch_y_mark = batch_y_mark.float().to(local_rank)
 
             if (
                 args.model == "GPT4TS_multi"
@@ -444,9 +457,9 @@ def vali(model, vali_data, vali_loader, criterion, args, itr):
                 or "TEMPO" in args.model
             ):
                 seq_trend, seq_seasonal, seq_resid = data[4], data[5], data[6]
-                seq_trend = seq_trend.float().to(model.rank)
-                seq_seasonal = seq_seasonal.float().to(model.rank)
-                seq_resid = seq_resid.float().to(model.rank)
+                seq_trend = seq_trend.float().to(local_rank)
+                seq_seasonal = seq_seasonal.float().to(local_rank)
+                seq_resid = seq_resid.float().to(local_rank)
                 outputs, _ = model(batch_x, itr, seq_trend, seq_seasonal, seq_resid)
             elif (
                 "former" in args.model
@@ -457,12 +470,12 @@ def vali(model, vali_data, vali_loader, criterion, args, itr):
                 dec_inp = (
                     torch.zeros_like(batch_y[:, -args.pred_len :, :])
                     .float()
-                    .to(model.rank)
+                    .to(local_rank)
                 )
                 dec_inp = (
                     torch.cat([batch_y[:, : args.label_len, :], dec_inp], dim=1)
                     .float()
-                    .to(model.rank)
+                    .to(local_rank)
                 )
                 outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
             else:
@@ -481,10 +494,30 @@ def vali(model, vali_data, vali_loader, criterion, args, itr):
 
                 loss = criterion(pred, true)
 
-            total_loss.append(loss.cpu().numpy())
+            total_loss += loss.item()
+            num_samples += batch_y.size(0)
 
-    # TODO: use dist.all_reduce to compute average
-    total_loss = np.average(total_loss)
+            if is_main_node:
+                pbar.update(1)
+
+    if is_main_node:
+        pbar.close()
+
+    # Compute local validation loss
+    local_vali_loss = total_loss / num_samples
+    local_vali_loss_tensor = torch.tensor(
+        local_vali_loss,
+        dtype=torch.float32,
+        device=local_rank,
+    )
+
+    tensor_list = [torch.zeros(1, device=local_rank) for _ in range(world_size)]
+
+    all_gather(tensor_list, local_vali_loss_tensor)
+
+    stacked_tensor = torch.stack(tensor_list)
+    aggregated_average_loss = torch.mean(stacked_tensor)
+
     if (
         args.model == "PatchTST"
         or args.model == "DLinear"
@@ -513,7 +546,7 @@ def vali(model, vali_data, vali_loader, criterion, args, itr):
         model.out_layer.train()
     else:
         model.train()
-    return total_loss
+    return aggregated_average_loss
 
 
 def MASE(x, freq, pred, true):
@@ -531,7 +564,9 @@ def test(
     model,
     test_loader,
     args,
-    device,
+    local_rank,
+    global_rank,
+    world_size,
     iteration,
     plot=True,
     read_values=False,
@@ -564,13 +599,16 @@ def test(
             model,
             test_loader,
             args,
-            device,
+            local_rank,
+            global_rank,
+            world_size,
             plot=plot,
             read_values=read_values,
         )
 
     results_file_path = f"./results/{values_file}"
-    if read_values:
+    is_main_node = global_rank == 0
+    if read_values and is_main_node:
         # Load values from .csv file
         df = pd.read_csv(results_file_path)
         y_pred = df["pred"].to_numpy()
@@ -585,14 +623,19 @@ def test(
 
     preds = []
     trues = []
-    total_mae = 0
-    total_mse = 0
+    total_mae = 0.0
+    total_mse = 0.0
     num_samples = 0
 
     model.eval()  # Set to evlauation mode
 
     with torch.no_grad():
-        for _, data in tqdm(enumerate(test_loader), total=len(test_loader)):
+        test_loader.sampler.set_epoch(iteration)
+
+        if is_main_node:
+            pbar = tqdm(total=len(test_loader))
+
+        for _, data in enumerate(test_loader):
             batch_x, batch_y, batch_x_mark, batch_y_mark = (
                 data[0],  # Input time series
                 data[1],  # Future time series
@@ -606,14 +649,14 @@ def test(
                 data[6],  # Residual component
             )
 
-            batch_x = batch_x.float().to(model.rank).to(device)
-            batch_x_mark = batch_x_mark.float().to(model.rank).to(device)
-            batch_y_mark = batch_y_mark.float().to(model.rank).to(device)
-            batch_y = batch_y.float().to(model.rank)
+            batch_x = batch_x.float().to(local_rank)
+            batch_x_mark = batch_x_mark.float().to(local_rank)
+            batch_y_mark = batch_y_mark.float().to(local_rank)
+            batch_y = batch_y.float().to(local_rank)
 
-            seq_trend = seq_trend.float().to(model.rank).to(device)
-            seq_seasonal = seq_seasonal.float().to(model.rank).to(device)
-            seq_resid = seq_resid.float().to(model.rank).to(device)
+            seq_trend = seq_trend.float().to(local_rank)
+            seq_seasonal = seq_seasonal.float().to(local_rank)
+            seq_resid = seq_resid.float().to(local_rank)
 
             # Compute forward pass
             if (
@@ -637,14 +680,13 @@ def test(
                 dec_inp = (
                     torch.zeros_like(batch_y[:, -args.pred_len :, :])
                     .float()
-                    .to(model.rank)
+                    .to(local_rank)
                 )
 
                 dec_inp = (
                     torch.cat([batch_y[:, : args.label_len, :], dec_inp], dim=1)
                     .float()
-                    .to(model.rank)
-                    .to(device)
+                    .to(local_rank)
                 )
 
                 outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
@@ -652,7 +694,7 @@ def test(
                 outputs = model(batch_x[:, -args.seq_len :, :], iteration)
 
             outputs = outputs[:, -args.pred_len :, :]
-            batch_y = batch_y[:, -args.pred_len :, :].to(device)
+            batch_y = batch_y[:, -args.pred_len :, :]
 
             # Save predicted values
             pred = outputs.detach().cpu().numpy().astype(np.float16)
@@ -668,36 +710,53 @@ def test(
             batch_mae, batch_mse = metric_mae_mse(pred, true)
 
             # Update the total errors (assuming batch_x.size(0) is batch size)
-            total_mae += batch_mae * batch_x.size(0)
-            total_mse += batch_mse * batch_x.size(0)
-            num_samples += batch_x.size(0)
+            batch_size = batch_x.size(0)
+            total_mae += batch_mae * batch_size
+            total_mse += batch_mse * batch_size
+            num_samples += batch_size
 
             torch.cuda.empty_cache()
 
-    batch_index = 0  # Index of which batch will be saved to .csv file
-    instance_index = 0  # Index of which instance will be saved to .csv file
+            if is_main_node:
+                pbar.update(1)
 
-    # Save predicted and true values to .csv file
-    df = pd.DataFrame(
-        data={
-            "true": trues[batch_index][instance_index].squeeze(),
-            "pred": preds[batch_index][instance_index].squeeze(),
-        }
-    )
-    df.to_csv(results_file_path, index=False)
+    if is_main_node:
+        pbar.close()
 
-    if plot:
+    if plot and is_main_node:
+        batch_index = 0  # Index of which batch will be saved to .csv file
+        instance_index = 0  # Index of which instance will be saved to .csv file
+
+        # Save predicted and true values to .csv file
+        df = pd.DataFrame(
+            data={
+                "true": trues[batch_index][instance_index].squeeze(),
+                "pred": preds[batch_index][instance_index].squeeze(),
+            }
+        )
+        df.to_csv(results_file_path, index=False)
+
         visual(
             trues[batch_index][instance_index],
             preds[batch_index][instance_index],
             file_name="test_det.png",
         )
 
-    # Calculate average errors
-    average_mae = total_mae / num_samples
-    average_mse = total_mse / num_samples
+    local_mae = total_mae / num_samples
+    local_mae_tensor = torch.tensor(local_mae, dtype=torch.float32, device=local_rank)
+    tensor_list = [torch.zeros(1, device=local_rank) for _ in range(world_size)]
+    all_gather(tensor_list, local_mae_tensor)
+    stacked_tensor = torch.stack(tensor_list)
+    aggregated_mae = torch.mean(stacked_tensor)
 
-    return average_mae, average_mse
+    local_mse = total_mse / num_samples
+    local_mse_tensor = torch.tensor(local_mse, dtype=torch.float32, device=local_rank)
+    tensor_list = [torch.zeros(1, device=local_rank) for _ in range(world_size)]
+    all_gather(tensor_list, local_mse_tensor)
+    stacked_tensor = torch.stack(tensor_list)
+    aggregated_mse = torch.mean(stacked_tensor)
+
+    return aggregated_mae, aggregated_mse
 
 
 def sample_negative_binomial(mu, alpha, num_samples=1):
@@ -733,7 +792,9 @@ def test_probs(
     model,
     test_loader,
     args,
-    device,
+    local_rank,
+    global_rank,
+    world_size,
     plot=True,
     read_values=False,
     values_file="prob_values.csv",
@@ -762,7 +823,8 @@ def test_probs(
     results_file_path = f"./results/{values_file}"
     plot_file_name = "test_probs.png"
 
-    if read_values:
+    is_main_node = global_rank == 0
+    if read_values and is_main_node:
         # Load values from .csv file
         df = pd.read_csv(results_file_path)
 
@@ -785,7 +847,13 @@ def test_probs(
     model.eval()  # Set to evlauation mode
 
     with torch.no_grad():
-        for _, data in tqdm(enumerate(test_loader), total=len(test_loader)):
+
+        test_loader.sampler.set_epoch(0)
+
+        if is_main_node:
+            pbar = tqdm(total=len(test_loader))
+
+        for i, data in enumerate(test_loader):
             batch_x, batch_y, batch_x_mark, batch_y_mark = (
                 data[0],  # Input time series
                 data[1],  # Future time series
@@ -799,14 +867,14 @@ def test_probs(
                 data[6],  # Residual component
             )
 
-            batch_x = batch_x.float().to(model.rank).to(device)
-            batch_x_mark = batch_x_mark.float().to(model.rank).to(device)
-            batch_y_mark = batch_y_mark.float().to(model.rank).to(device)
-            batch_y = batch_y.float().to(model.rank)
+            batch_x = batch_x.float().to(local_rank)
+            batch_x_mark = batch_x_mark.float().to(local_rank)
+            batch_y_mark = batch_y_mark.float().to(local_rank)
+            batch_y = batch_y.float().to(local_rank)
 
-            seq_trend = seq_trend.float().to(model.rank).to(device)
-            seq_seasonal = seq_seasonal.float().to(model.rank).to(device)
-            seq_resid = seq_resid.float().to(model.rank).to(device)
+            seq_trend = seq_trend.float().to(local_rank)
+            seq_seasonal = seq_seasonal.float().to(local_rank)
+            seq_resid = seq_resid.float().to(local_rank)
 
             # Compute channel-wise predictions
             for channel in range(batch_x.shape[-1]):
@@ -820,6 +888,7 @@ def test_probs(
                     pred_len=args.pred_len,
                 )
 
+                # TODO: figure out how to append arrays to tensor in parallel
                 # Save probability distributions
                 distribution = probabilistic_forecasts.cpu().numpy()
                 distributions.append(distribution)
@@ -843,26 +912,32 @@ def test_probs(
 
             torch.cuda.empty_cache()
 
+            if is_main_node:
+                pbar.update(1)
+
+    if is_main_node:
+        pbar.close()
+
     trues = np.array(trues)
     preds = np.array(preds)
     lower_bounds = np.array(lower_bounds)
     upper_bounds = np.array(upper_bounds)
 
-    batch_index = 0  # Index of which batch will be plotted
-    instance_index = 0  # Index of which instance will be plotted
+    if plot and is_main_node:
+        batch_index = 0  # Index of which batch will be plotted
+        instance_index = 0  # Index of which instance will be plotted
 
-    # Save predicted and true values to .csv file
-    df = pd.DataFrame(
-        data={
-            "true": trues[batch_index][instance_index].squeeze(),
-            "pred": preds[batch_index][instance_index].squeeze(),
-            "lower": lower_bounds[batch_index][instance_index],
-            "upper": upper_bounds[batch_index][instance_index],
-        }
-    )
-    df.to_csv(results_file_path, index=False)
+        # Save predicted and true values to .csv file
+        df = pd.DataFrame(
+            data={
+                "true": trues[batch_index][instance_index].squeeze(),
+                "pred": preds[batch_index][instance_index].squeeze(),
+                "lower": lower_bounds[batch_index][instance_index],
+                "upper": upper_bounds[batch_index][instance_index],
+            }
+        )
+        df.to_csv(results_file_path, index=False)
 
-    if plot:
         visual(
             trues[batch_index][instance_index],
             preds[batch_index][instance_index],

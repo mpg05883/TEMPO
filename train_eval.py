@@ -14,6 +14,7 @@ from torch.distributed import (
     all_gather,
     barrier,
     destroy_process_group,
+    get_world_size,
     init_process_group,
 )
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -327,7 +328,7 @@ def print_batch_updates(
     loss,
     batch_start_time,
     num_batches,
-    training_steps,
+    train_steps,
 ):
     """
     Prints two strings. The first string displays the current batch, epoch,
@@ -340,7 +341,7 @@ def print_batch_updates(
         loss: Training loss during current batch
         batch_start_time: Current batch's start time
         num_batches: Total number of batches in current epoch
-        training_steps: Total number of training steps in training set data loader
+        train_steps: Total number of training steps in training set data loader
     """
     # Create message displaying current batch, epoch, and loss
     batch_msg = f"Batch: {batch}, epoch: {epoch + 1}, loss: {loss.item():.3f}"
@@ -352,9 +353,7 @@ def print_batch_updates(
     speed_msg = f"Average epoch speed: {speed:.3f}s/epoch"
 
     # Estimate remaining amount of time in seconds
-    remaining_time_seconds = speed * (
-        (args.train_epochs - epoch) * training_steps - batch
-    )
+    remaining_time_seconds = speed * ((args.train_epochs - epoch) * train_steps - batch)
     time_msg = f"estiamted remaining time: {remaining_time_seconds:.0f}s"
 
     # Create message displaying epoch speed and remaining time
@@ -427,7 +426,16 @@ def get_criterion(loss_func: str):
     return criterion
 
 
-def train(model, args, local_rank, train_loader, vali_data, vali_loader, iteration):
+def train(
+    model,
+    args,
+    local_rank,
+    global_rank,
+    train_loader,
+    vali_data,
+    vali_loader,
+    iteration,
+):
     """
     Trains a model for either deterministic or probabilstic time series
     forecasting, depending on the loss function specified in args
@@ -472,22 +480,20 @@ def train(model, args, local_rank, train_loader, vali_data, vali_loader, iterati
     )
 
     # Get number of training steps
-    # training_steps = len(train_loader)
+    train_steps = len(train_loader)
 
     for epoch in range(args.train_epochs):
-        # epoch_start_time = time.time()
         print_rank_0(f"\n========== Epoch {epoch + 1}/{args.train_epochs} ==========")
-        # num_batches = 0
-        train_loss = []
+        total_train_loss = 0.0  # Current epoch's total training loss
+        num_samples = 0
         train_loader.sampler.set_epoch(epoch)
         vali_loader.sampler.set_epoch(epoch)
 
-        is_not_master_process = dist.get_local_rank() != 0
-        for i, data in tqdm(
-            enumerate(train_loader),
-            # total=training_steps,
-            disable=is_not_master_process,
-        ):
+        is_main_node = global_rank == 0
+        if is_main_node:
+            pbar = tqdm(total=len(train_steps))
+
+        for i, data in enumerate(train_loader):
             # batch_start_time = time.time()
             # num_batches += 1
 
@@ -555,19 +561,9 @@ def train(model, args, local_rank, train_loader, vali_data, vali_loader, iterati
                 if not args.no_stl_loss:
                     loss += args.stl_weight * loss_local
 
-            train_loss.append(loss.item())
-
-            # Print update every 1000 batches
-            if (i + 1) % 1000 == 0:
-                pass
-                # print_batch_updates(
-                #     i,
-                #     epoch,
-                #     loss,
-                #     batch_start_time,
-                #     num_batches,
-                #     training_steps,
-                # )
+            # Increment total training loss and number of samples
+            total_train_loss += loss.item()
+            num_samples += batch_y.size(0)
 
             # Compute backward pass
             loss.backward()
@@ -575,28 +571,42 @@ def train(model, args, local_rank, train_loader, vali_data, vali_loader, iterati
             # Update parameters
             optimizer.step()
 
-        # Outside for loop
+            # Update progress bar
+            if is_main_node:
+                pbar.update(1)
+                pbar.set_postfix(loss=loss.item())
 
-        # Print update after finishing current epoch
-        # print_epoch_time(epoch_start_time)
+        # Outside for loop
+        barrier()
+
+        if is_main_node:
+            pbar.close()
 
         # Compute current epoch's average training loss
-        train_loss = torch.tensor(
-            train_loss,
+        local_train_loss = total_train_loss / num_samples
+        local_train_loss_tensor = torch.tensor(
+            local_train_loss,
             dtype=torch.float32,
-            device=f'cuda"{local_rank}',
+            device=local_rank,
         )
+        # print(
+        #     f"Node {global_rank}, GPU {local_rank}: Average training loss = {local_train_loss_tensor.item():.3e}"
+        # )
 
-        dist.all_reduce(train_loss, op=dist.ReduceOp.SUM)
+        world_size = get_world_size()
+        tensor_list = [torch.zeros(1, device=local_rank) for _ in range(world_size)]
 
-        train_loss /= dist.get_world_size()
-
-        train_loss = train_loss.item()
+        all_gather(tensor_list, local_train_loss_tensor)
+        stacked_tensor = torch.stack(tensor_list)
+        aggregated_train_loss = torch.mean(stacked_tensor)
 
         # TODO: paralleize validation loss calculation
         # Compute current epoch's validation loss
         vali_loss = vali(
             model,
+            local_rank,
+            global_rank,
+            world_size,
             vali_data,
             vali_loader,
             criterion,
@@ -605,7 +615,8 @@ def train(model, args, local_rank, train_loader, vali_data, vali_loader, iterati
         )
 
         # Print current epoch's training and validation loss
-        print_epoch_loss(train_loss, vali_loss)
+        barrier()
+        print_epoch_loss(aggregated_train_loss, vali_loss)
 
         if args.cos:
             scheduler.step()
@@ -622,6 +633,8 @@ def train(model, args, local_rank, train_loader, vali_data, vali_loader, iterati
             )
             print_rank_0("Ending training procedure early...")
             break
+
+        barrier()
 
     return model
 
@@ -662,10 +675,12 @@ def train_eval(args, config, local_rank):
             model = DDP(model, device_ids=[local_rank])
         else:
             print_rank_0("\nStarting training procedure...")
+            global_rank = int(os.environ["RANK"])
             model = train(
                 model,
                 args,
                 local_rank,
+                global_rank,
                 train_loader,
                 vali_data,
                 vali_loader,
@@ -685,7 +700,9 @@ def train_eval(args, config, local_rank):
             model,
             test_loader,
             args,
-            # device,
+            local_rank,
+            global_rank,
+            get_world_size(),
             i,
             read_values=args.read_values,
         )
