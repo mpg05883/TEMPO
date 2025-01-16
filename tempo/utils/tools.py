@@ -105,6 +105,8 @@ class EarlyStopping:
         score = -val_loss
         if self.best_score is None:
             self.best_score = score
+            if global_rank != 0:
+                return
             self.save_checkpoint(val_loss, model, path, global_rank)
         elif score < self.best_score + self.delta:
             self.counter += 1
@@ -116,8 +118,10 @@ class EarlyStopping:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(val_loss, model, path, global_rank)
             self.counter = 0
+            if global_rank != 0:
+                return
+            self.save_checkpoint(val_loss, model, path, global_rank)
 
     def save_checkpoint(self, val_loss, model, path, global_rank):
         if global_rank != 0:

@@ -595,7 +595,12 @@ def train(
         else:
             adjust_learning_rate(optimizer, epoch + 1, args)
 
-        early_stopping(aggregated_average_vali_loss, model, model_directory)
+        early_stopping(
+            aggregated_average_vali_loss,
+            model,
+            model_directory,
+            global_rank,
+        )
         if early_stopping.early_stop:
             print_rank_0(
                 f"\nEarlyStopping reached{early_stopping.counter}/{early_stopping.patience}"
