@@ -1,4 +1,5 @@
 import torch
+import torchmetrics
 
 # Check PyTorch version
 print("PyTorch version: ", torch.__version__)
@@ -9,6 +10,8 @@ print("Is CUDA available? ", torch.cuda.is_available())
 # Check CUDA version
 print("CUDA version: ", torch.version.cuda)
 
+
+print("Torchmetrics version: ", torchmetrics.__version__)
 
 # Check if CUDA is available
 if torch.cuda.is_available():
