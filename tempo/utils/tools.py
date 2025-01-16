@@ -18,6 +18,7 @@ from tempo.utils.imputation_metrics import (  # mae_withmask,; mse_withmask,
     calc_quantile_CRPS,
     calc_quantile_CRPS_sum,
 )
+from tempo.utils.metrics import aggregate_metric
 
 # import torch.distributions as dist
 
@@ -400,7 +401,7 @@ def vali(
     args,
     itr,
 ):
-    total_loss = 0.0
+    total_vali_loss = 0.0  # Total validation loss on this process only
     num_samples = 0
 
     if (
@@ -437,17 +438,17 @@ def vali(
         if is_main_node:
             pbar = tqdm(len(vali_loader))
 
-        for i, data in enumerate(vali_loader):
+        for _, data in enumerate(vali_loader):
             batch_x, batch_y, batch_x_mark, batch_y_mark = (
-                data[0],
-                data[1],
+                data[0],  # Input time series
+                data[1],  # Future time series
                 data[2],
                 data[3],
             )
 
+            # Move tensors to GPU
             batch_x = batch_x.float().to(local_rank)
             batch_y = batch_y.float().to(local_rank)
-
             batch_x_mark = batch_x_mark.float().to(local_rank)
             batch_y_mark = batch_y_mark.float().to(local_rank)
 
@@ -456,7 +457,13 @@ def vali(
                 or args.model == "NLinear_multi"
                 or "TEMPO" in args.model
             ):
-                seq_trend, seq_seasonal, seq_resid = data[4], data[5], data[6]
+                seq_trend, seq_seasonal, seq_resid = (
+                    data[4],  # Trend component
+                    data[5],  # Seasonal component
+                    data[6],  # Residual component
+                )
+
+                # Move tensors to GPU
                 seq_trend = seq_trend.float().to(local_rank)
                 seq_seasonal = seq_seasonal.float().to(local_rank)
                 seq_resid = seq_resid.float().to(local_rank)
@@ -488,36 +495,29 @@ def vali(
             else:
                 outputs = outputs[:, -args.pred_len :, :]
                 batch_y = batch_y[:, -args.pred_len :, :]
+                loss = criterion(outputs, batch_y)
 
-                pred = outputs.detach().cpu()
-                true = batch_y.detach().cpu()
-
-                loss = criterion(pred, true)
-
-            total_loss += loss.item()
+            # Increment total validation loss and number of samples
+            total_vali_loss += loss.item()
             num_samples += batch_y.size(0)
 
+            # Update progress bar
             if is_main_node:
                 pbar.update(1)
 
+    # Outside for loop
     if is_main_node:
         pbar.close()
 
-    # Compute local validation loss
-    local_vali_loss = total_loss / num_samples
-    local_vali_loss_tensor = torch.tensor(
-        local_vali_loss,
-        dtype=torch.float32,
-        device=local_rank,
+    # Get aggregated average validation loss across all processes
+    aggregated_average_vali_loss = aggregate_metric(
+        total_vali_loss,
+        num_samples,
+        local_rank,
+        world_size,
     )
 
-    tensor_list = [torch.zeros(1, device=local_rank) for _ in range(world_size)]
-
-    all_gather(tensor_list, local_vali_loss_tensor)
-
-    stacked_tensor = torch.stack(tensor_list)
-    aggregated_average_loss = torch.mean(stacked_tensor)
-
+    # TODO: check if model's train() method is parallelized
     if (
         args.model == "PatchTST"
         or args.model == "DLinear"
@@ -546,7 +546,7 @@ def vali(
         model.out_layer.train()
     else:
         model.train()
-    return aggregated_average_loss
+    return aggregated_average_vali_loss
 
 
 def MASE(x, freq, pred, true):

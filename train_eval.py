@@ -11,7 +11,6 @@ import torch.nn as nn
 from numpy.random import choice
 from omegaconf import OmegaConf
 from torch.distributed import (
-    all_gather,
     barrier,
     destroy_process_group,
     get_world_size,
@@ -30,15 +29,13 @@ from tempo.models.GPT4TS import GPT4TS
 from tempo.models.PatchTST import PatchTST
 from tempo.models.T5 import T54TS
 from tempo.models.TEMPO import TEMPO
+from tempo.utils.metrics import aggregate_metric
 from tempo.utils.tools import EarlyStopping, adjust_learning_rate, test, vali
 
 FIX_SEED = 2021
 random.seed(FIX_SEED)
 torch.manual_seed(FIX_SEED)
 np.random.seed(FIX_SEED)
-
-# Directory where checkpoints are stored
-CHECKPOINTS_DIRECTORY = "checkpoints"
 
 SEASONALITY_MAP = {
     "minutely": 1440,
@@ -293,24 +290,6 @@ def negative_binomial_nll(target, y_pred):
     return -log_prob.mean()
 
 
-def print_epoch_loss(train_loss, vali_loss):
-    """
-    Prints two strings. The first string displays current epoch number and
-    total number of training steps. Second string displays current epoch's
-    training loss and validation loss
-
-    Args:
-        train_loss: Model's loss on training set
-        vali_loss: Model's loss on validation set
-
-    Returns:
-        str: string displaying current epoch number, total number of training
-             steps in training set data loader, current epoch's training loss,
-             and current epoch's validation loss
-    """
-    print_rank_0(f"Train loss: {train_loss:.3f} | Val loss: {vali_loss:.3f}")
-
-
 def print_epoch_time(epoch_start_time):
     """
     Prints string displaying number of minutes elapsed during current epoch
@@ -362,38 +341,37 @@ def print_batch_updates(
     print_rank_0(speed_and_time_msg)
 
 
-def get_checkpoint(loss_func: str):
+def get_checkpoint_path(loss_func: str):
     """
     Returns a file path to a trained model's checkpoint
 
     Args:
         loss_func: Loss function that model was trained to optimized.
-                   Determines if deterministic or probabilistic model
-                   checkpoint is returned
+                   If loss_func is "mse," then deterministic model's checkpoint
+                   will be returned. Else, probabilistic model's checkpoint
+                   will be returned
 
     Returns:
-        str: File path to trained model's checkpoint
+        checkpoint_path: File path to trained model's checkpoint
     """
-    # Path to checkpoints_directory (./checkpoints)
-    checkpoints_directory_path = os.path.join(CHECKPOINTS_DIRECTORY, "Monash_1")
+    # Directory where checkpoints for all models are stored
+    checkpoints_directory = "checkpoints"
 
-    """
-    If loss func is "mse", then get deterministic model's directory. Else, get
-    probabilstic model's directory
-    """
+    checkpoints_directory_path = os.path.join(checkpoints_directory, "Monash_1")
+
     is_prob = "_Prob_" if loss_func == "mse" else "_"
 
     # Directory where model's checkpoint is stored
-    model_dir = f"Demo_Monash_TEMPO{is_prob}6_prompt_learn_336_96_100_sl336_ll0_pl96_dm768_nh4_el3_gl6_df768_ebtimeF_itr0"
+    model_directory = f"Demo_Monash_TEMPO{is_prob}6_prompt_learn_336_96_100_sl336_ll0_pl96_dm768_nh4_el3_gl6_df768_ebtimeF_itr0"
 
-    # Path to model_dir (./checkpoints/model_dir)
-    model_dir_path = os.path.join(checkpoints_directory_path, model_dir)
+    # Path to model_directory (./checkpoints/model_directory)
+    model_directory_path = os.path.join(checkpoints_directory_path, model_directory)
 
-    # Name of checkpoint file in model_dir
+    # Name of checkpoint file in model_directory
     checkpoint_file = "checkpoint.pth"
 
-    # Path to checkpoint.pth (./checkpoints/model_dir/checkpoint_file)
-    checkpoint_path = os.path.join(model_dir_path, checkpoint_file)
+    # Path to checkpoint.pth (./checkpoints/model_directory/checkpoint_file)
+    checkpoint_path = os.path.join(model_directory_path, checkpoint_file)
 
     return checkpoint_path
 
@@ -431,6 +409,7 @@ def train(
     args,
     local_rank,
     global_rank,
+    world_size,
     train_loader,
     vali_data,
     vali_loader,
@@ -443,7 +422,9 @@ def train(
     Args:
         model: Model to be trained
         args: Command line arguments
-        local_rank: Unique identifier of the GPU that's running
+        local_rank: Unique identifier on local node
+        global_rank: Unique identifier across all nodes
+        world_size: Number of processes across all nodes
         train_loader: Training set's data loader
         vali_data: Validation set
         vali_loader: Validation set's data loader
@@ -456,12 +437,12 @@ def train(
     settings = get_settings(args, iteration)
 
     # Create path to directory where model will be saved
-    model_path = os.path.join(args.checkpoints, settings)
+    model_directory = os.path.join(args.checkpoints, settings)
 
     # Create directory where model will be saved if it doesn't exist
-    if not os.path.exists(model_path):
-        os.makedirs(model_path)
-    print_rank_0(f"Model will be saved to {model_path}")
+    if not os.path.exists(model_directory):
+        os.makedirs(model_directory)
+    print_rank_0(f"Model will be saved to {model_directory}")
 
     # Wrap model with DDP
     model = DDP(model, device_ids=[local_rank])
@@ -469,34 +450,34 @@ def train(
     # Specify loss function
     criterion = get_criterion(loss_func=args.loss_func)
 
+    # Initialize optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
+    # Initialize early stopping
     early_stopping = EarlyStopping(patience=args.patience, verbose=True)
 
+    # Initialize scheduler
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=args.tmax,
         eta_min=1e-8,
     )
 
-    # Get number of training steps
-    train_steps = len(train_loader)
+    is_main_node = global_rank == 0
 
     for epoch in range(args.train_epochs):
         print_rank_0(f"\n========== Epoch {epoch + 1}/{args.train_epochs} ==========")
-        total_train_loss = 0.0  # Current epoch's total training loss
+        total_train_loss = 0.0  # Total training loss on this process only
         num_samples = 0
+
         train_loader.sampler.set_epoch(epoch)
         vali_loader.sampler.set_epoch(epoch)
 
-        is_main_node = global_rank == 0
+        # Only display progress bar on global rank 0 process
         if is_main_node:
-            pbar = tqdm(total=len(train_steps))
+            pbar = tqdm(total=len(train_loader))
 
-        for i, data in enumerate(train_loader):
-            # batch_start_time = time.time()
-            # num_batches += 1
-
+        for _, data in enumerate(train_loader):
             batch_x, batch_y, batch_x_mark, batch_y_mark = (
                 data[0],  # Input time series
                 data[1],  # Future time series
@@ -510,11 +491,11 @@ def train(
                 data[6],  # Residual component
             )
 
+            # Move tensors to GPU
             batch_x = batch_x.float().to(local_rank)
             batch_y = batch_y.float().to(local_rank)
             batch_x_mark = batch_x_mark.float().to(local_rank)
             batch_y_mark = batch_y_mark.float().to(local_rank)
-
             seq_trend = seq_trend.float().to(local_rank)
             seq_seasonal = seq_seasonal.float().to(local_rank)
             seq_resid = seq_resid.float().to(local_rank)
@@ -550,11 +531,11 @@ def train(
 
             # Compute current batch's loss
             if args.loss_func == "prob" or args.loss_func == "negative_binomial":
-                batch_y = batch_y[:, -args.pred_len :, :].to(local_rank).squeeze()
+                batch_y = batch_y[:, -args.pred_len :, :].squeeze()
                 loss = criterion(batch_y, outputs)
             else:
                 outputs = outputs[:, -args.pred_len :, :]
-                batch_y = batch_y[:, -args.pred_len :, :].to(local_rank)
+                batch_y = batch_y[:, -args.pred_len :, :]
                 loss = criterion(outputs, batch_y)
 
             if args.model == "GPT4TS_multi" or args.model == "TEMPO_t5":
@@ -574,35 +555,21 @@ def train(
             # Update progress bar
             if is_main_node:
                 pbar.update(1)
-                pbar.set_postfix(loss=loss.item())
 
         # Outside for loop
-        barrier()
-
         if is_main_node:
             pbar.close()
 
-        # Compute current epoch's average training loss
-        local_train_loss = total_train_loss / num_samples
-        local_train_loss_tensor = torch.tensor(
-            local_train_loss,
-            dtype=torch.float32,
-            device=local_rank,
+        # Get aggregated average training loss across all processes
+        aggregated_average_train_loss = aggregate_metric(
+            total_train_loss,
+            num_samples,
+            local_rank,
+            world_size,
         )
-        # print(
-        #     f"Node {global_rank}, GPU {local_rank}: Average training loss = {local_train_loss_tensor.item():.3e}"
-        # )
 
-        world_size = get_world_size()
-        tensor_list = [torch.zeros(1, device=local_rank) for _ in range(world_size)]
-
-        all_gather(tensor_list, local_train_loss_tensor)
-        stacked_tensor = torch.stack(tensor_list)
-        aggregated_train_loss = torch.mean(stacked_tensor)
-
-        # TODO: paralleize validation loss calculation
         # Compute current epoch's validation loss
-        vali_loss = vali(
+        aggregated_average_vali_loss = vali(
             model,
             local_rank,
             global_rank,
@@ -614,9 +581,11 @@ def train(
             iteration,
         )
 
-        # Print current epoch's training and validation loss
-        barrier()
-        print_epoch_loss(aggregated_train_loss, vali_loss)
+        # Print current epoch's training and validation loss across all processes
+        print_rank_0(
+            f"Train loss: {aggregated_average_train_loss:.3f}"
+            f" | Val loss: {aggregated_average_vali_loss:.3f}"
+        )
 
         if args.cos:
             scheduler.step()
@@ -626,31 +595,33 @@ def train(
         else:
             adjust_learning_rate(optimizer, epoch + 1, args)
 
-        early_stopping(vali_loss, model, model_path)
+        early_stopping(aggregated_average_vali_loss, model, model_directory)
         if early_stopping.early_stop:
             print_rank_0(
                 f"\nEarlyStopping reached{early_stopping.counter}/{early_stopping.patience}"
+                "\nEnding training procedure early..."
             )
-            print_rank_0("Ending training procedure early...")
             break
-
-        barrier()
 
     return model
 
 
-def train_eval(args, config, local_rank):
+def train_eval(args, config, local_rank, global_rank, world_size):
     """
     Runs training and evlauation loop for args.itr iterations
 
     Args:
         args: Command line arguments
         config: Configuration object for model
-        local_rank: Unique identifier on current node
+        local_rank: Unique identifier on local node
+        global_rank: Unique identifier across all nodes
+        world_size: Number of processes across all nodes
     """
+
     for i in range(args.itr):
         print_rank_0(f"\n========== Iteration {i + 1}/{args.itr} ==========")
 
+        # Get datasets and dataloaders
         (
             _,  # train_data
             train_loader,
@@ -660,27 +631,36 @@ def train_eval(args, config, local_rank):
             vali_loader,
         ) = prepare_data_loaders(args, config)
 
+        # Get model based on model architecture specified in args
         model = get_model(args, args.model)
-        model = model.to(local_rank)
-        model.global_rank = int(os.environ["RANK"])
 
-        # TODO: train/test model (move tensors to correct device)
-        if args.get_checkpoint:
-            checkpoint_path = get_checkpoint(args.loss_func)
+        # Move model to GPU
+        model = model.to(local_rank)
+
+        # Add global rank attribute to model
+        model.global_rank = global_rank
+
+        if args.get_checkpoint_path:
+            # Get file path to trained model's checkpoint
+            checkpoint_path = get_checkpoint_path(args.loss_func)
             print_rank_0(f"\nLoading model from {checkpoint_path}...")
 
+            # Load trained model's parameters
             checkpoint = torch.load(checkpoint_path)
             model.load_state_dict(checkpoint, strict=False)
 
+            # Wrap model with DDP
             model = DDP(model, device_ids=[local_rank])
         else:
             print_rank_0("\nStarting training procedure...")
-            global_rank = int(os.environ["RANK"])
+
+            # Train model
             model = train(
                 model,
                 args,
                 local_rank,
                 global_rank,
+                world_size,
                 train_loader,
                 vali_data,
                 vali_loader,
@@ -713,20 +693,39 @@ def train_eval(args, config, local_rank):
         print_rank_0(f"{metric_1}: {value_1:.4f}")
         print_rank_0(f"{metric_2}: {value_2:.4f}")
 
-        if args.get_checkpoint or args.read_values:
+        if args.get_checkpoint_path or args.read_values:
             break
 
 
 def main(args):
+    # Setup process group
     ddp_setup()
-    start_time = time.time()
+
+    # Load configuration
     config = get_init_config(args.config_path)
+
     if args.print_args_config:
         print_args_config(args, config)
-    local_rank = int(os.environ["local_rank"])
-    train_eval(args, config, local_rank)
+
+    # Unique identifier on local node
+    local_rank = int(os.environ["LOCAL_RANK"])
+
+    # Unique identifier across all nodes
+    global_rank = int(os.environ["RANK"])
+
+    # Number of processes across all nodes
+    world_size = get_world_size()
+
+    start_time = time.time()
+
+    # Run training and evaluation loops
+    train_eval(args, config, local_rank, global_rank, world_size)
+
+    # Get number of minutes it took to run training and evaluation loops
     time_elapsed_min = np.abs((time.time() - start_time) / 60)
     print_rank_0(f"\nFinished! Time elapsed: {time_elapsed_min:.0f} minutes\n")
+
+    # Clean up process group
     destroy_process_group()
 
 
@@ -756,13 +755,14 @@ if __name__ == "__main__":
         default="weather_GTP4TS_multi-debug",
     )
 
-    if not os.path.exists(CHECKPOINTS_DIRECTORY):
-        os.makedirs(CHECKPOINTS_DIRECTORY)
+    checkpoints_directory = "checkpoints"
+    if not os.path.exists(checkpoints_directory):
+        os.makedirs(checkpoints_directory)
 
     parser.add_argument(
         "--checkpoints",
         type=str,
-        default=CHECKPOINTS_DIRECTORY,
+        default=checkpoints_directory,
         help="Path to `checkpoints` directory",
     )
     parser.add_argument(
@@ -827,6 +827,7 @@ if __name__ == "__main__":
         "--patience",
         type=int,
         default=5,
+        help="",  # number of times to try and get a lower val loss before prematurely ending training
     )
     parser.add_argument(
         "--gpt_layers",
