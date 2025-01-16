@@ -10,7 +10,12 @@ import torch.distributions as dist
 import torch.nn as nn
 from numpy.random import choice
 from omegaconf import OmegaConf
-from torch.distributed import destroy_process_group, init_process_group
+from torch.distributed import (
+    all_gather,
+    barrier,
+    destroy_process_group,
+    init_process_group,
+)
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import Subset
 from torch.utils.data.distributed import DistributedSampler
@@ -48,16 +53,16 @@ SEASONALITY_MAP = {
 
 
 def ddp_setup():
-    torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+    torch.cuda.set_device(int(os.environ["local_rank"]))
     init_process_group(backend="nccl")
 
 
 def print_rank_0(message: str):
     """
-    Prints message on rank 0 process
+    Prints message on global rank 0 process
     """
-    if dist.get_rank() == 0:
-        print_rank_0(message)
+    if int(os.environ["RANK"]) == 0:
+        print(message)
 
 
 def print_args_config(args, config):
@@ -422,7 +427,7 @@ def get_criterion(loss_func: str):
     return criterion
 
 
-def train(model, args, rank, train_loader, vali_data, vali_loader, iteration):
+def train(model, args, local_rank, train_loader, vali_data, vali_loader, iteration):
     """
     Trains a model for either deterministic or probabilstic time series
     forecasting, depending on the loss function specified in args
@@ -430,7 +435,7 @@ def train(model, args, rank, train_loader, vali_data, vali_loader, iteration):
     Args:
         model: Model to be trained
         args: Command line arguments
-        rank: Unique identifier of the GPU that's running
+        local_rank: Unique identifier of the GPU that's running
         train_loader: Training set's data loader
         vali_data: Validation set
         vali_loader: Validation set's data loader
@@ -449,6 +454,9 @@ def train(model, args, rank, train_loader, vali_data, vali_loader, iteration):
     if not os.path.exists(model_path):
         os.makedirs(model_path)
     print_rank_0(f"Model will be saved to {model_path}")
+
+    # Wrap model with DDP
+    model = DDP(model, device_ids=[local_rank])
 
     # Specify loss function
     criterion = get_criterion(loss_func=args.loss_func)
@@ -474,7 +482,7 @@ def train(model, args, rank, train_loader, vali_data, vali_loader, iteration):
         train_loader.sampler.set_epoch(epoch)
         vali_loader.sampler.set_epoch(epoch)
 
-        is_not_master_process = dist.get_rank() != 0
+        is_not_master_process = dist.get_local_rank() != 0
         for i, data in tqdm(
             enumerate(train_loader),
             # total=training_steps,
@@ -496,20 +504,19 @@ def train(model, args, rank, train_loader, vali_data, vali_loader, iteration):
                 data[6],  # Residual component
             )
 
-            batch_x = batch_x.float().to(rank)
-            batch_y = batch_y.float().to(rank)
-            batch_x_mark = batch_x_mark.float().to(rank)
-            batch_y_mark = batch_y_mark.float().to(rank)
+            batch_x = batch_x.float().to(local_rank)
+            batch_y = batch_y.float().to(local_rank)
+            batch_x_mark = batch_x_mark.float().to(local_rank)
+            batch_y_mark = batch_y_mark.float().to(local_rank)
 
-            seq_trend = seq_trend.float().to(rank)
-            seq_seasonal = seq_seasonal.float().to(rank)
-            seq_resid = seq_resid.float().to(rank)
+            seq_trend = seq_trend.float().to(local_rank)
+            seq_seasonal = seq_seasonal.float().to(local_rank)
+            seq_resid = seq_resid.float().to(local_rank)
 
             # Clear gradients
             optimizer.zero_grad()
 
             # Compute forward pass
-            # TODO: restore model files to commit "updated cmd line args" so forward passes use gpu
             if args.model == "TEMPO" or "multi" in args.model:
                 outputs, loss_local = model(
                     batch_x,
@@ -520,13 +527,15 @@ def train(model, args, rank, train_loader, vali_data, vali_loader, iteration):
                 )
             elif "former" in args.model:
                 dec_inp = (
-                    torch.zeros_like(batch_y[:, -args.pred_len :, :]).float().to(rank)
+                    torch.zeros_like(batch_y[:, -args.pred_len :, :])
+                    .float()
+                    .to(local_rank)
                 )
 
                 dec_inp = (
                     torch.cat([batch_y[:, : args.label_len, :], dec_inp], dim=1)
                     .float()
-                    .to(rank)
+                    .to(local_rank)
                 )
 
                 outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
@@ -535,11 +544,11 @@ def train(model, args, rank, train_loader, vali_data, vali_loader, iteration):
 
             # Compute current batch's loss
             if args.loss_func == "prob" or args.loss_func == "negative_binomial":
-                batch_y = batch_y[:, -args.pred_len :, :].to(rank).squeeze()
+                batch_y = batch_y[:, -args.pred_len :, :].to(local_rank).squeeze()
                 loss = criterion(batch_y, outputs)
             else:
                 outputs = outputs[:, -args.pred_len :, :]
-                batch_y = batch_y[:, -args.pred_len :, :].to(rank)
+                batch_y = batch_y[:, -args.pred_len :, :].to(local_rank)
                 loss = criterion(outputs, batch_y)
 
             if args.model == "GPT4TS_multi" or args.model == "TEMPO_t5":
@@ -575,7 +584,7 @@ def train(model, args, rank, train_loader, vali_data, vali_loader, iteration):
         train_loss = torch.tensor(
             train_loss,
             dtype=torch.float32,
-            device=f'cuda"{rank}',
+            device=f'cuda"{local_rank}',
         )
 
         dist.all_reduce(train_loss, op=dist.ReduceOp.SUM)
@@ -617,20 +626,18 @@ def train(model, args, rank, train_loader, vali_data, vali_loader, iteration):
     return model
 
 
-def train_eval(args, config, rank):
+def train_eval(args, config, local_rank):
     """
     Runs training and evlauation loop for args.itr iterations
 
     Args:
         args: Command line arguments
         config: Configuration object for model
-        rank: Unique identifier of each process
+        local_rank: Unique identifier on current node
     """
-
     for i in range(args.itr):
         print_rank_0(f"\n========== Iteration {i + 1}/{args.itr} ==========")
 
-        # Get data loaders for training, validation, and test sets
         (
             _,  # train_data
             train_loader,
@@ -640,38 +647,32 @@ def train_eval(args, config, rank):
             vali_loader,
         ) = prepare_data_loaders(args, config)
 
-        # Initialize model
         model = get_model(args, args.model)
+        model = model.to(local_rank)
+        model.global_rank = int(os.environ["RANK"])
 
-        # Move model to GPU
-        model = model.to(rank)
-
-        # Wrap model in DDP
-        model = DDP(model, device_ids=[rank])
-
-        # Add attribute for process rank
-        model.rank = rank
-
+        # TODO: train/test model (move tensors to correct device)
         if args.get_checkpoint:
-            # Get trained model's checkpoint
             checkpoint_path = get_checkpoint(args.loss_func)
             print_rank_0(f"\nLoading model from {checkpoint_path}...")
 
-            # Unwrap model from DDP and load checkpoint
             checkpoint = torch.load(checkpoint_path)
-            model.module.load_state_dict(checkpoint, strict=False)
+            model.load_state_dict(checkpoint, strict=False)
+
+            model = DDP(model, device_ids=[local_rank])
         else:
             print_rank_0("\nStarting training procedure...")
             model = train(
                 model,
                 args,
-                rank,
+                local_rank,
                 train_loader,
                 vali_data,
                 vali_loader,
                 i,
             )
 
+        barrier()
         # TODO: parallelize evaluation code once you've parallelized training code
         print_rank_0("\n========== Evaluating Model ==========")
         """
@@ -700,22 +701,16 @@ def train_eval(args, config, rank):
 
 
 def main(args):
-    start_time = time.time()
-
     ddp_setup()
-
+    start_time = time.time()
     config = get_init_config(args.config_path)
-
     if args.print_args_config:
         print_args_config(args, config)
-
-    rank = int(os.environ["LOCAL_RANK"])
-    train_eval(args, config, rank)
-
-    destroy_process_group()
-
+    local_rank = int(os.environ["local_rank"])
+    train_eval(args, config, local_rank)
     time_elapsed_min = np.abs((time.time() - start_time) / 60)
     print_rank_0(f"\nFinished! Time elapsed: {time_elapsed_min:.0f} minutes\n")
+    destroy_process_group()
 
 
 """
