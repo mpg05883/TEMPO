@@ -1,5 +1,9 @@
+import sys
+
 import torch
 import torchmetrics
+
+print("Python version: ", sys.version)
 
 # Check PyTorch version
 print("PyTorch version: ", torch.__version__)
