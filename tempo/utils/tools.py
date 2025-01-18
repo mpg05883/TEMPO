@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 from huggingface_hub import hf_hub_download
-from torch.distributed import all_gather
+from torch.distributed import all_gather, get_world_size
 
 # import torch.nn as nn
 from torch.distributions import NegativeBinomial
@@ -399,8 +399,6 @@ def vali(
     model,
     local_rank,
     global_rank,
-    world_size,
-    vali_data,
     vali_loader,
     criterion,
     args,
@@ -522,7 +520,6 @@ def vali(
         total_vali_loss,
         num_samples,
         local_rank,
-        world_size,
     )
 
     # TODO: check if model's train() method is parallelized
@@ -999,3 +996,8 @@ def test_probs(
     )
 
     return crps_sum, crps
+
+
+def print_rank_0(message: str):
+    if int(os.environ["RANK"]) == 0:
+        print(message)
