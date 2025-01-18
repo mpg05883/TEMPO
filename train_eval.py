@@ -10,16 +10,10 @@ import torch.distributions as dist
 import torch.nn as nn
 from numpy.random import choice
 from omegaconf import OmegaConf
-from torch.distributed import (
-    barrier,
-    destroy_process_group,
-    get_world_size,
-    init_process_group,
-)
-from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.distributed import destroy_process_group, init_process_group
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import Subset
 from torch.utils.data.distributed import DistributedSampler
-from tqdm import tqdm
 
 from smape import SMAPE
 from tempo.data_provider.data_factory import data_provider
@@ -30,14 +24,7 @@ from tempo.models.PatchTST import PatchTST
 from tempo.models.T5 import T54TS
 from tempo.models.TEMPO import TEMPO
 from tempo.trainer.trainer import Trainer
-from tempo.utils.metrics import aggregate_metric
-from tempo.utils.tools import (
-    EarlyStopping,
-    adjust_learning_rate,
-    print_rank_0,
-    test,
-    vali,
-)
+from tempo.utils.tools import EarlyStopping, print_rank_0
 
 FIX_SEED = 2021
 random.seed(FIX_SEED)
@@ -107,18 +94,6 @@ def _update_args_from_config(args, config, dataset_name):
         args.freq = "h"
 
 
-def print_rank_0(message: str, gpu_avaliable: bool = False):
-    """
-    Prints message on global rank 0 process
-    """
-    if not gpu_avaliable:
-        print(message)
-        return
-
-    if int(os.environ["RANK"]) == 0:
-        print(message)
-
-
 def print_dataset_info(data, loader, name="Dataset"):
     print_rank_0(f"\n{name} Info:")
     print_rank_0(f"- Number of samples: {len(data):,}")
@@ -131,17 +106,17 @@ def print_dataset_info(data, loader, name="Dataset"):
             print_rank_0(f"- {attr}: {getattr(data, attr)}")
 
 
-def prepare_data_loaders(args, config, gpu_avaliable: bool = False):
+def prepare_data_loaders(args, config):
     """
-    Prepare train, validation and test data loaders.
+    Prepares train, validation and test data loaders for use with one or more
+    GPUs
 
     Args:
-        args: Arguments containing dataset configurations
-        config: Configuration dictionary
+        args: Command line arguments
+        config: Configuration object for model
 
     Returns:
-        tuple: (train_data, train_loader, test_data, test_loader, val_data,
-                val_loader)
+        tuple: (train_loader, val_loader, test_loader)
     """
     train_datas = []
     val_datas = []
@@ -218,7 +193,7 @@ def prepare_data_loaders(args, config, gpu_avaliable: bool = False):
     print_dataset_info(val_data, val_loader, "Validation Dataset")
     print_dataset_info(test_data, test_loader, "Test Dataset")
 
-    return train_data, train_loader, test_data, test_loader, val_data, val_loader
+    return train_loader, val_loader, test_loader
 
 
 def get_checkpoint_path(loss_func: str):
@@ -327,24 +302,20 @@ def get_criterion(loss_func: str):
 
 
 def train_eval(args, config, iteration):
+    """
+    Runs training and evaluation procedures. If --load_checkpoint flag is
+    passed, then trained model is loaded and evaluated
+
+    Args:
+        args: Command line arguments
+        config: Configuration object for model
+        iteration: Current iteration out of args.itr iterations
+    """
     model = get_model(architecture=args.model)
-
-    (
-        _,  # train_data
-        train_loader,
-        _,  # test_data
-        test_loader,
-        _,  # val_data
-        val_loader,
-    ) = prepare_data_loaders(args, config)
-
+    train_loader, val_loader, test_loader = prepare_data_loaders(args, config)
     criterion = get_criterion(loss_func=args.loss_func)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=args.tmax,
-        eta_min=1e-8,
-    )
+    scheduler = CosineAnnealingLR(optimizer, T_max=args.tmax, eta_min=1e-8)
     early_stopping = EarlyStopping(patience=args.patience, verbose=True)
 
     trainer = Trainer(
@@ -359,7 +330,6 @@ def train_eval(args, config, iteration):
         optimizer,
         scheduler,
         early_stopping,
-        args.snapshot_directory,
     )
 
     if args.load_checkpoint:
@@ -370,15 +340,14 @@ def train_eval(args, config, iteration):
         print_rank_0("\nStarting training procedure...")
         trainer.train()
 
-    barrier()
     return trainer.test()
 
 
 def main(args):
     if not torch.cuda.is_available():
         print(
-            "Could not find GPU. At least one GPU is needed to run script."
-            "\nEnding script now..."
+            "Could not find GPU. At least one GPU is needed to run this script."
+            "\nTerminating now..."
         )
         return
 
@@ -728,6 +697,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--snapshot_directory",
         type=str,
+        default="snapshots",
         help="Directory to save snapshots during training",
     )
     args = parser.parse_args()

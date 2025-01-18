@@ -25,6 +25,8 @@ def data_provider(args, flag, drop_last_test=True, train_all=False):
     percent = args.percent
     max_len = args.max_len
 
+    # Set `shuffle` to False when using DistributedSampler
+    shuffle_flag = False
     if flag == "test":
         # shuffle_flag = False
         drop_last = drop_last_test
@@ -61,12 +63,16 @@ def data_provider(args, flag, drop_last_test=True, train_all=False):
         train_all=train_all,
         data_name=args.data_name,
     )
+
+    # Initialize DistributedSampler for parallel computing
+    sampler = DistributedSampler(data_set)
+
     data_loader = DataLoader(
         data_set,
         batch_size=batch_size,
-        shuffle=False,
+        shuffle=shuffle_flag,
         num_workers=args.num_workers,
         drop_last=drop_last,
-        sampler=DistributedSampler(data_set),
+        sampler=sampler,
     )
     return data_set, data_loader

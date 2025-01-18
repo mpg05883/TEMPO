@@ -25,7 +25,6 @@ class Trainer:
         optimizer,
         scheduler,
         early_stopping,
-        snapshot_path: str,
     ):
         self.args = args
         self.config = config
@@ -42,7 +41,7 @@ class Trainer:
         self.scheduler = scheduler
         self.early_stopping = early_stopping
         self.epochs_ran = 0
-        self.snapshot_path = snapshot_path
+        self.snapshot_path = self.args.snapshot_path
         self._load_snapshot()
 
     def _load_snapshot(self):
@@ -187,6 +186,7 @@ class Trainer:
         pass
 
     def test(self, plot=True, values_file="det_values.csv"):
+        # for now, I can just call test() from utils/tools.py
         if self.args.loss_func != "mse":
             return self._test_probs()
 
@@ -197,9 +197,6 @@ class Trainer:
 
         preds = torch.tensor([], dtype=torch.float32)
         trues = torch.tensor([], dtype=torch.float32)
-
-        mse = MeanSquaredError()
-        mae = MeanAbsoluteError()
 
         total_mae = 0.0
         total_mse = 0.0
@@ -255,8 +252,8 @@ class Trainer:
                 true = batch_y.detach()
                 trues = torch.cat((trues, true))
 
-                batch_mae = mae(pred, true)
-                batch_mse = mse(pred, true)
+                batch_mae = MeanAbsoluteError(pred, true)
+                batch_mse = MeanSquaredError(pred, true)
 
                 batch_size = len(next(iter(self.test_loader))[0])
                 total_mae += batch_mae * batch_size
