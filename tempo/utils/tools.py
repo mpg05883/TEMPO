@@ -99,17 +99,18 @@ class EarlyStopping:
         self.early_stop = False
         self.val_loss_min = np.Inf
         self.delta = delta
-        self.local_rank
 
     def __call__(self, val_loss, model, path, global_rank):
         score = -val_loss
         if self.best_score is None:
             self.best_score = score
+            # Only save checkpoint on rank 0 process
             if global_rank != 0:
                 return
-            self.save_checkpoint(val_loss, model, path, global_rank)
+            self.save_checkpoint(val_loss, model, path)
         elif score < self.best_score + self.delta:
             self.counter += 1
+            # Only print on rank 0 process
             if global_rank == 0:
                 print(
                     f"No decrease in val loss. EarlyStopping counter: {self.counter} out of {self.patience}"
@@ -119,14 +120,12 @@ class EarlyStopping:
         else:
             self.best_score = score
             self.counter = 0
+            # Only save checkpoint on rank 0 process
             if global_rank != 0:
                 return
-            self.save_checkpoint(val_loss, model, path, global_rank)
+            self.save_checkpoint(val_loss, model, path)
 
-    def save_checkpoint(self, val_loss, model, path, global_rank):
-        if global_rank != 0:
-            return
-
+    def save_checkpoint(self, val_loss, model, path):
         if self.verbose:
             print(
                 f"Val loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}). Saving model to {path}..."
@@ -516,13 +515,9 @@ def vali(
         pbar.close()
 
     # Get aggregated average validation loss across all processes
-    aggregated_average_vali_loss = aggregate_metric(
-        total_vali_loss,
-        num_samples,
-        local_rank,
-    )
+    aggregated_average_vali_loss = aggregate_metric(total_vali_loss, num_samples)
 
-    # TODO: check if model's train() method is parallelized
+    # Set to training mode
     if (
         args.model == "PatchTST"
         or args.model == "DLinear"
@@ -759,20 +754,10 @@ def test(
         )
 
     # Get aggregated average MAE across all processes
-    aggregated_average_mae = aggregate_metric(
-        total_mae,
-        num_samples,
-        local_rank,
-        world_size,
-    )
+    aggregated_average_mae = aggregate_metric(total_mae, num_samples)
 
     # Get aggregated average MSE across all processes
-    aggregated_average_mse = aggregate_metric(
-        total_mse,
-        num_samples,
-        local_rank,
-        world_size,
-    )
+    aggregated_average_mse = aggregate_metric(total_mse, num_samples)
 
     return aggregated_average_mae, aggregated_average_mse
 
@@ -1000,4 +985,5 @@ def test_probs(
 
 def print_rank_0(message: str):
     if int(os.environ["RANK"]) == 0:
+        print(message)
         print(message)

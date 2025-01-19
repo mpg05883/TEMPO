@@ -209,23 +209,18 @@ def get_checkpoint_path(loss_func: str):
     Returns:
         checkpoint_path: File path to trained model's checkpoint
     """
-    # Directory where checkpoints for all models are stored
     checkpoints_directory = "checkpoints"
 
     checkpoints_directory_path = os.path.join(checkpoints_directory, "Monash_1")
 
     is_prob = "_Prob_" if loss_func == "mse" else "_"
 
-    # Directory where model's checkpoint is stored
     model_directory = f"Demo_Monash_TEMPO{is_prob}6_prompt_learn_336_96_100_sl336_ll0_pl96_dm768_nh4_el3_gl6_df768_ebtimeF_itr0"
 
-    # Path to model_directory (./checkpoints/model_directory)
     model_directory_path = os.path.join(checkpoints_directory_path, model_directory)
 
-    # Name of checkpoint file in model_directory
     checkpoint_file = "checkpoint.pth"
 
-    # Path to checkpoint.pth (./checkpoints/model_directory/checkpoint_file)
     checkpoint_path = os.path.join(model_directory_path, checkpoint_file)
 
     return checkpoint_path
@@ -290,13 +285,13 @@ def negative_binomial_nll(target, y_pred):
 
 
 def get_criterion(loss_func: str):
-    if args.loss_func == "mse":
+    if loss_func == "mse":
         criterion = nn.MSELoss()
-    elif args.loss_func == "smape":
+    elif loss_func == "smape":
         criterion = SMAPE()
-    elif args.loss_func == "prob":
+    elif loss_func == "prob":
         criterion = studentT_nll
-    elif args.loss_func == "negative_binomial":
+    elif loss_func == "negative_binomial":
         criterion = negative_binomial_nll
     return criterion
 

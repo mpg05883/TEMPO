@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import torch
 from torch.distributed import all_gather, get_world_size
@@ -56,7 +58,7 @@ def metric(pred, true):
     return mae, mse, rmse, mape, mspe, smape, nd
 
 
-def aggregate_metric(total, num_samples, local_rank):
+def aggregate_metric(total, num_samples):
     """
     Takes the average of a metric, then aggregates the averages computed by all
     processes.
@@ -64,9 +66,9 @@ def aggregate_metric(total, num_samples, local_rank):
     Args:
         total: Total accumulated metric
         num_samples: Number of samples
-        local_rank: Unique identifier on local node
     """
     # Compute this process's average
+    local_rank = int(os.environ["LOCAL_RANK"])
     local_average = total / num_samples
     local_average_tensor = torch.tensor(
         local_average,
