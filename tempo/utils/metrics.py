@@ -58,7 +58,18 @@ def metric(pred, true):
     return mae, mse, rmse, mape, mspe, smape, nd
 
 
-def aggregate_metric(total, num_samples):
+def aggregate_tensors(tensor: torch.Tensor):
+    local_rank = int(os.environ["LOCAL_RANK"])
+    world_size = get_world_size()
+    tensor_list = [
+        torch.zeros_like(tensor, device=local_rank) for _ in range(world_size)
+    ]
+    all_gather(tensor_list, tensor)
+    stacked_tensor = torch.stack(tensor_list)
+    return stacked_tensor
+
+
+def aggregate_metrics(total, num_samples):
     """
     Takes the average of a metric, then aggregates the averages computed by all
     processes.
@@ -68,23 +79,18 @@ def aggregate_metric(total, num_samples):
         num_samples: Number of samples
     """
     # Compute this process's average
-    local_rank = int(os.environ["LOCAL_RANK"])
     local_average = total / num_samples
+    local_rank = int(os.environ["LOCAL_RANK"])
     local_average_tensor = torch.tensor(
         local_average,
         dtype=torch.float32,
         device=local_rank,
     )
 
-    # Create a list of tensors to store tensors from all processes
-    world_size = get_world_size()
-    tensor_list = [torch.zeros(1, device=local_rank) for _ in range(world_size)]
-
-    # Aggregate local average tensors across all processes
-    all_gather(tensor_list, local_average_tensor)
+    # Aggregate average tensors across all processes
+    stacked_tensor = aggregate_tensors(local_average_tensor)
 
     # Get aggregated average
-    stacked_tensor = torch.stack(tensor_list)
     aggregated_average = torch.mean(stacked_tensor)
 
     return aggregated_average

@@ -335,14 +335,16 @@ def train_eval(args, config, iteration):
         print_rank_0("\nStarting training procedure...")
         trainer.train()
 
-    return trainer.test()
+    print_rank_0("\nStarting evaluation procedure...")
+    value_1, value_2 = trainer.test()
+    return value_1, value_2
 
 
 def main(args):
     if not torch.cuda.is_available():
         print(
             "Could not find GPU. At least one GPU is needed to run this script."
-            "\nTerminating now..."
+            "\nEnding script..."
         )
         return
 

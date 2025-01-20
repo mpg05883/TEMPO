@@ -9,8 +9,14 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torchmetrics import MeanAbsoluteError, MeanSquaredError
 from tqdm import tqdm
-from utils.metrics import aggregate_metric
-from utils.tools import adjust_learning_rate, print_rank_0
+from utils.metrics import aggregate_metrics, aggregate_tensors
+from utils.tools import (
+    EarlyStopping,
+    adjust_learning_rate,
+    calc_quantile_CRPS,
+    calc_quantile_CRPS_sum,
+    print_rank_0,
+)
 
 
 class Trainer:
@@ -26,7 +32,7 @@ class Trainer:
         criterion,
         optimizer,
         scheduler,
-        early_stopping,
+        early_stopping: EarlyStopping,
     ):
         self.args = args
         self.config = config
@@ -181,59 +187,160 @@ class Trainer:
         batch_size = batch_x.size(0)
         return loss, batch_size
 
+    def _tensors_to_numpy(
+        y_true: torch.Tensor,
+        y_pred: torch.Tensor = None,
+        lower_bounds: torch.Tensor = None,
+        upper_bounds: torch.Tensor = None,
+        batch_index: int = 0,
+        instance_index: int = 0,
+    ):
+        y_true = y_true[batch_index][instance_index].cpu().numpy().squeeze()
+        if y_pred is not None:
+            y_pred = y_pred[batch_index][instance_index].cpu().numpy().squeeze()
+        if lower_bounds is not None:
+            lower_bounds = lower_bounds[batch_index][instance_index].cpu().numpy()
+        if upper_bounds is not None:
+            upper_bounds = upper_bounds[batch_index][instance_index].cpu().numpy()
+        return y_true, y_pred, lower_bounds, upper_bounds
+
+    def _get_plot_name(self):
+        prefix = "det" if self.args.loss_func == "mse" else "prob"
+        return f"{prefix}_true_vs_pred"
+
     def _create_plot(
         self,
         y_true,
         y_pred=None,
         lower_bounds=None,
         upper_bounds=None,
-        confidence_level=95,
-        file_name="pred_vs_true.png",
+        batch_index=0,
+        instance_index=0,
+        confidence_level: int = 95,
+        file_name: str = None,
+        directory: str = "plots",
     ):
-        plots_directory = "plots"
-        if not os.path.exists(plots_directory):
-            os.makedirs(plots_directory)
+        # If y_true is a tensor, then the rest of the iterables are most likely
+        # tensors too, so convert them to numpy arrays
+        if torch.is_tensor(y_true):
+            y_true, y_pred, lower_bounds, upper_bounds = self._tensors_to_numpy(
+                y_true,
+                y_pred,
+                lower_bounds,
+                upper_bounds,
+                instance_index,
+                batch_index,
+            )
 
+        # Create directory if it doesn't exist
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        # Create plot
         plt.figure()
-        plt.title("Ground Truth vs Predicted Values")
-        plt.plot(y_true, label="Ground Truth", linewidth=2)
+        plt.plot(y_true, label="True", linewidth=2)
+
         if y_pred is not None:
             plt.plot(y_pred, label="Predicted", linewidth=2)
 
-            if lower_bounds is not None and upper_bounds is not None:
-                x = range(len(y_pred))
-                color = "orange"
-                alpha = 0.2
-                label = f"Prediction Interval ({confidence_level}% confidence)"
-                plt.fill_between(
-                    x=x,
-                    y1=lower_bounds,
-                    y2=upper_bounds,
-                    color=color,
-                    alpha=alpha,
-                    label=label,
-                )
+        if lower_bounds is not None and upper_bounds is not None:
+            plt.fill_between(
+                x=range(len(y_pred)),
+                y1=lower_bounds,
+                y2=upper_bounds,
+                color="orange",
+                alpha=0.2,
+                label=f"Prediction Interval ({confidence_level}% confidence)",
+            )
+
+        plt.title("True vs Predicted Values")
         plt.xlabel("time")
         plt.ylabel("y")
         plt.legend()
 
-        file_path = os.path.join(plots_directory, file_name)
-        plt.savefig(file_path, bbox_inches="tight")
+        # If no file name is given, then generate name based on loss function
+        if file_name is None:
+            file_name = self._get_plot_name()
+        plot_file_path = os.path.join(directory, f"{file_name}.png")
+
+        # Save plot
+        plt.savefig(plot_file_path, bbox_inches="tight")
+
+    def _read_from_csv(self, file_name: str, directory: str = "results"):
+        file_path = os.path.join(directory, file_name)
+        df = pd.read_csv(file_path)
+        return tuple(df[col] for col in df.columns)
+
+    def _write_tensors_to_csv(
+        self,
+        file_name: str,
+        y_true: torch.Tensor,
+        y_pred: torch.Tensor,
+        lower_bounds: torch.Tensor = None,
+        upper_bounds: torch.Tensor = None,
+        batch_index: int = 0,
+        instance_index: int = 0,
+        directory="results",
+    ):
+        y_true, y_pred, lower_bounds, upper_bounds = self._tensors_to_numpy(
+            y_true,
+            y_pred,
+            lower_bounds,
+            upper_bounds,
+            batch_index,
+            instance_index,
+        )
+
+        data = {
+            "pred": y_pred,
+            "true": y_true,
+        }
+
+        if lower_bounds is not None and upper_bounds is not None:
+            data["lower"] = lower_bounds
+            data["upper"] = upper_bounds
+
+        df = pd.DataFrame(data)
+        file_path = os.path.join(directory, file_name)
+        df.to_csv(file_path, index=False)
+
+    def _read_from_csv_and_plot(self, csv_file_name: str, plot_file_name: str):
+        y_true, y_pred, lower_bounds, upper_bounds = self._read_from_csv(csv_file_name)
+        self._create_plot(y_true, y_pred, lower_bounds, upper_bounds, plot_file_name)
+
+    def _write_to_csv_and_plot(
+        self,
+        csv_file_name: str,
+        plot_file_name: str,
+        y_true: torch.Tensor,
+        y_pred: torch.Tensor = None,
+        lower_bounds: torch.Tensor = None,
+        upper_bounds: torch.Tensor = None,
+        batch_index: int = 0,
+        instance_index: int = 0,
+    ):
+        self._write_tensors_to_csv(
+            csv_file_name,
+            y_true,
+            y_pred,
+            lower_bounds,
+            upper_bounds,
+            batch_index,
+            instance_index,
+        )
+        self._create_plot(y_true, y_pred, lower_bounds, upper_bounds, plot_file_name)
 
     def _test_probs(
         self,
         plot=True,
-        results_directory="results",
-        results_file="prob_values.csv",
+        plot_file_name=None,
+        overwrite_csv=True,
+        csv_file_name="prob_values.csv",
         batch_index=0,
         instance_index=0,
     ):
         if self.args.read_values and self.global_rank == 0:
-            results_path = os.path.join(results_directory, results_file)
-            df = pd.read_csv(results_path)
-            y_true = df["true"]
-            y_pred = df["pred"]
-            self._create_plot(y_true, y_pred)
+            self._read_from_csv_and_plot(csv_file_name, plot_file_name)
 
         distributions = torch.tensor([], device=self.local_rank)
         y_pred = torch.tensor([], device=self.local_rank)
@@ -249,7 +356,7 @@ class Trainer:
             if self.global_rank == 0:
                 progress_bar = tqdm(total=len(self.test_loader))
 
-            for _, data in enumerate(self.test_loader):
+            for data in self.test_loader:
                 batch_x, batch_y, batch_x_mark, batch_y_mark = (
                     data[0],  # Input time series
                     data[1],  # Future time series
@@ -273,6 +380,8 @@ class Trainer:
                 seq_resid = seq_resid.float().to(self.local_rank)
 
                 num_channels = batch_x.shape[-1]
+
+                # Compute channel-wise predictions
                 for channel in range(num_channels):
                     probabilistic_forecasts = self.model.predict_prob(
                         batch_x[:, -self.args.seq_len :, channel : channel + 1],
@@ -319,72 +428,94 @@ class Trainer:
                         )
                     )
 
-                torch.cuda.empty_cache()
-
                 if self.global_rank == 0:
                     progress_bar.update(1)
 
         if self.global_rank == 0:
             progress_bar.close()
 
-        # TODO: swap axes
+        # Aggregate tensors from all processes
+        aggregated_distributions = aggregate_tensors(distributions)
+        aggregated_y_true = aggregate_tensors(y_true)
+        aggregated_y_pred = aggregate_tensors(y_pred)
+        aggregated_lower_bounds = aggregate_tensors(lower_bounds)
+        aggregated_upper_bounds = aggregate_tensors(upper_bounds)
+        aggregated_masks = aggregate_tensors(masks)
 
-        # TODO: compute local crps sum and crps
+        # Swap axes
+        aggregated_y_true = torch.swapaxes(aggregated_y_true.squeeze(), -2, -3)
+        unormzalized_gt_data = torch.swapaxes(aggregated_y_true.squeeze(), -1, -2)
+        aggregated_masks = torch.swapaxes(aggregated_masks.squeeze(), -1, -2)
+        target_mask = torch.swapaxes(aggregated_masks.squeeze(), -1, -2)
 
-        # TODO: figure out how to compute aggregated metrics
-        crps_sum, crps = 0, 0
+        crps_sum = calc_quantile_CRPS_sum(
+            unormzalized_gt_data,
+            aggregated_distributions,
+            target_mask,
+            mean_scaler=0,
+            scaler=1,
+        )
 
-        if plot and self.global_rank == 0:
-            # TODO: figure out how to aggregate y_pred and y_true from all processes
-            y_true = y_true[batch_index][instance_index].cpu().numpy().squeeze()
-            y_pred = y_pred[batch_index][instance_index].cpu().numpy().squeeze()
-            lower_bounds = lower_bounds[batch_index][instance_index].cpu().numpy()
-            upper_bounds = upper_bounds[batch_index][instance_index].cpu().numpy()
-            self._create_plot(y_pred, y_true, lower_bounds, upper_bounds)
-            data = {
-                "true": y_true,
-                "pred": y_pred,
-                "lower": lower_bounds,
-                "upper": upper_bounds,
-            }
-            self._create_plot()
-            df = pd.DataFrame(data)
-            df.to_csv(results_path, index=False)
+        crps = calc_quantile_CRPS(
+            unormzalized_gt_data,
+            aggregated_distributions,
+            target_mask,
+            mean_scaler=0,
+            scaler=1,
+        )
+
+        if plot and overwrite_csv and self.global_rank == 0:
+            self._write_to_csv_and_plot(
+                csv_file_name,
+                plot_file_name,
+                aggregated_y_true,
+                aggregated_y_pred,
+                aggregated_lower_bounds,
+                aggregated_upper_bounds,
+                batch_index,
+                instance_index,
+            )
 
         return crps_sum, crps
 
-    # * for now, I can just call test() from utils/tools.py
     def test(
         self,
         plot=True,
-        results_directory="results",
-        results_file="det_values.csv",
+        plot_file_name=None,
+        overwrite_csv=True,
+        csv_file_name="det_values.csv",
+        batch_index=0,
+        instance_index=0,
     ):
         if self.args.loss_func != "mse":
-            return self._test_probs(plot, results_directory)
+            # Keep default csv file when name calling _test_probs()
+            return self._test_probs(
+                plot,
+                plot_file_name,
+                overwrite_csv,
+                batch_index,
+                instance_index,
+            )
 
         if self.args.read_values and self.global_rank == 0:
-            results_path = os.path.join(results_directory, results_file)
-            df = pd.read_csv(results_path)
-            y_true = df["true"]
-            y_pred = df["pred"]
-            self._create_plot(y_true, y_pred)
+            self._read_from_csv_and_plot(csv_file_name, plot_file_name)
 
         y_pred = torch.tensor([], device=self.local_rank)
         y_true = torch.tensor([], device=self.local_rank)
 
-        total_mae = 0.0
-        total_mse = 0.0
-        num_samples = 0
+        total_mae = 0.0  # Total MAE for a single process
+        total_mse = 0.0  # Total MSE for a single process
+        num_samples = 0  # Number of samples seen on a single process
 
         self.model.eval()
         with torch.no_grad():
-            self.test_loader.set_epoch(self.iteration)
+            self.test_loader.sampler.set_epoch(self.iteration)
 
+            # Only display progress bar on rank 0 process
             if self.global_rank == 0:
                 progress_bar = tqdm(total=len(self.test_loader))
 
-            for _, data in enumerate(self.test_loader):
+            for data in self.test_loader:
                 batch_x, batch_y, batch_x_mark, batch_y_mark = (
                     data[0],  # Input time series
                     data[1],  # Future time series
@@ -418,13 +549,9 @@ class Trainer:
                 )
 
                 # Save last pred_len values
-                outputs = outputs[:, -self.args.pred_len :, :]
-                batch_y = batch_y[:, -self.args.pred_len :, :]
-
-                outputs = outputs.detach()
+                outputs = outputs[:, -self.args.pred_len :, :].detach()
+                batch_y = batch_y[:, -self.args.pred_len :, :].detach()
                 y_pred = torch.cat((y_pred, outputs))
-
-                batch_y = batch_y.detach()
                 y_true = torch.cat((y_true, batch_y))
 
                 batch_mae = MeanAbsoluteError(outputs, batch_y)
@@ -441,22 +568,22 @@ class Trainer:
         if self.global_rank == 0:
             progress_bar.close()
 
-        if plot and self.global_rank == 0:
-            # TODO: figure out how to aggregate y_pred and y_true from all processes
-            y_pred = y_pred.cpu().numpy().squeeze()
-            y_true = y_true.cpu().numpy().squeeze()
-            self._create_plot(y_pred, y_true)
+        # Aggregate y_true and y_pred from all processes
+        aggregated_y_true = aggregate_tensors(y_true)
+        aggregated_y_pred = aggregate_tensors(y_pred)
 
-            # Save pred and true values to .csv file for debugging
-            data = {
-                "pred": y_pred,
-                "true": y_true,
-            }
-            df = pd.DataFrame(data)
-            df.to_csv(results_path, index=False)
+        if plot and overwrite_csv and self.global_rank == 0:
+            self._write_to_csv_and_plot(
+                csv_file_name,
+                plot_file_name,
+                aggregated_y_true,
+                aggregated_y_pred,
+                batch_index,
+                instance_index,
+            )
 
-        average_mae = aggregate_metric(total_mae, num_samples)
-        average_mse = aggregate_metric(total_mse, num_samples)
+        average_mae = aggregate_metrics(total_mae, num_samples)
+        average_mse = aggregate_metrics(total_mse, num_samples)
 
         return average_mae, average_mse
 
@@ -483,7 +610,7 @@ class Trainer:
             progress_bar.close()
 
         # Aggregate validation loss across all processes
-        average_val_loss = aggregate_metric(total_val_loss, num_samples)
+        average_val_loss = aggregate_metrics(total_val_loss, num_samples)
         return average_val_loss
 
     def train(self):
@@ -527,7 +654,7 @@ class Trainer:
                 progress_bar.close()
 
             # Aggregate average training losses across all processses
-            average_train_loss = aggregate_metric(total_train_loss, num_samples)
+            average_train_loss = aggregate_metrics(total_train_loss, num_samples)
 
             # Compute average validation loss across all processses
             average_val_loss = self._evaluate_validation_set(epoch)
@@ -551,6 +678,12 @@ class Trainer:
                 model_directory,
                 self.global_rank,
             )
+            if self.early_stopping.early_stop:
+                print_rank_0(
+                    f"\nEarlyStopping reached {self.early_stopping.counter}/{self.early_stopping.patience}"
+                    "\nEnding training procedure early..."
+                )
+                return
             if self.early_stopping.early_stop:
                 print_rank_0(
                     f"\nEarlyStopping reached {self.early_stopping.counter}/{self.early_stopping.patience}"
