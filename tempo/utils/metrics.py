@@ -1,8 +1,4 @@
-import os
-
 import numpy as np
-import torch
-from torch.distributed import all_gather, get_world_size
 
 
 def RSE(pred, true):
@@ -56,41 +52,3 @@ def metric(pred, true):
     nd = ND(pred, true)
 
     return mae, mse, rmse, mape, mspe, smape, nd
-
-
-def aggregate_tensors(tensor: torch.Tensor):
-    local_rank = int(os.environ["LOCAL_RANK"])
-    world_size = get_world_size()
-    tensor_list = [
-        torch.zeros_like(tensor, device=local_rank) for _ in range(world_size)
-    ]
-    all_gather(tensor_list, tensor)
-    stacked_tensor = torch.stack(tensor_list)
-    return stacked_tensor
-
-
-def aggregate_metrics(total, num_samples):
-    """
-    Takes the average of a metric, then aggregates the averages computed by all
-    processes.
-
-    Args:
-        total: Total accumulated metric
-        num_samples: Number of samples
-    """
-    # Compute this process's average
-    local_average = total / num_samples
-    local_rank = int(os.environ["LOCAL_RANK"])
-    local_average_tensor = torch.tensor(
-        local_average,
-        dtype=torch.float32,
-        device=local_rank,
-    )
-
-    # Aggregate average tensors across all processes
-    stacked_tensor = aggregate_tensors(local_average_tensor)
-
-    # Get aggregated average
-    aggregated_average = torch.mean(stacked_tensor)
-
-    return aggregated_average

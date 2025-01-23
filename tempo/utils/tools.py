@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime
 from distutils.util import strtobool
@@ -12,14 +13,18 @@ from torch.distributed import all_gather, get_world_size
 
 # import torch.nn as nn
 from torch.distributions import NegativeBinomial
+from torch.utils.data import DataLoader, Dataset
+from torch.utils.data.distributed import DistributedSampler
 from torchmetrics import MeanAbsoluteError, MeanSquaredError
 from tqdm import tqdm
+
+# Configure logger
+logging.basicConfig(level=logging.DEBUG, format="%(message)s")
 
 from tempo.utils.imputation_metrics import (  # mae_withmask,; mse_withmask,
     calc_quantile_CRPS,
     calc_quantile_CRPS_sum,
 )
-from tempo.utils.metrics import aggregate_metric
 
 # import torch.distributions as dist
 
@@ -983,7 +988,159 @@ def test_probs(
     return crps_sum, crps
 
 
-def print_rank_0(message: str):
-    if int(os.environ["RANK"]) == 0:
-        print(message)
-        print(message)
+def get_global_rank() -> int:
+    """
+    Returns a process's local rank
+
+    Returns:
+        int: Current process's local rank
+    """
+    return int(os.environ["RANK"])
+
+
+def get_local_rank() -> int:
+    """
+    Returns a process's global rank
+
+    Returns:
+        int: Current process's global rank
+    """
+    return int(os.environ["LOCAL_RANK"])
+
+
+def is_main_process() -> bool:
+    """
+    Returns true if this process has a global rank of 0
+
+    Returns:
+        bool: True if this process has a global rank of 0
+    """
+    global_rank = get_global_rank()
+    return global_rank == 0
+
+
+def get_timestamp() -> str:
+    """
+    Gets the current time formatted as month/day/year hour:minute:second
+
+    Returns:
+        str: Current time formatted as month/day/year hour:minute:second
+    """
+    current_timestamp = datetime.now()
+    formatted_timestamp = current_timestamp.strftime("%m/%d/%Y %H:%M:%S")
+    return formatted_timestamp
+
+
+def _format_message(
+    message: str,
+    show_global_rank: bool = False,
+    show_timestamp: bool = False,
+    epoch: int = None,
+):
+    if epoch is not None:
+        message = f"Epoch {epoch + 1} | {message}"
+    if show_global_rank:
+        message = f"GPU {get_global_rank()} | {message}"
+    if show_timestamp:
+        message = f"{get_timestamp()} | {message}"
+    return message
+
+
+def _print_helper(
+    message: str,
+    show_global_rank: bool = False,
+    show_timestamp: bool = False,
+    debug: bool = False,
+    warning: bool = False,
+    error: bool = False,
+    critical: bool = False,
+    epoch: int = None,
+):
+    message = _format_message(message, show_global_rank, show_timestamp, epoch)
+    if critical:
+        logging.critical(message)
+        return
+    elif error:
+        logging.error(message)
+        return
+    elif warning:
+        logging.warning(message)
+        return
+    elif debug:
+        logging.debug(message)
+        return
+    else:
+        logging.info(message)
+
+
+def distributed_print(
+    message: str,
+    to_all: bool = False,
+    show_global_rank: bool = False,
+    show_timestamp: bool = False,
+    debug: bool = False,
+    warning: bool = False,
+    error: bool = False,
+    critical: bool = False,
+    epoch: int = None,
+):
+    if to_all:
+        _print_helper(
+            message,
+            True,  # Show global rank when printing to all processses
+            show_timestamp,
+            debug,
+            warning,
+            error,
+            critical,
+            epoch,
+        )
+        return
+
+    if not is_main_process():
+        return
+
+    _print_helper(
+        message,
+        show_global_rank,
+        show_timestamp,
+        debug,
+        warning,
+        error,
+        critical,
+        epoch,
+    )
+
+
+def aggregate_tensors(tensor: torch.Tensor):
+    world_size = get_world_size()
+    local_rank = get_local_rank()
+    tensor_list = [
+        torch.zeros_like(tensor, device=local_rank) for _ in range(world_size)
+    ]
+    all_gather(tensor_list, tensor)
+    stacked_tensor = torch.stack(tensor_list)
+    return stacked_tensor
+
+
+def aggregate_metrics(total, num_samples):
+    """
+    Takes the average of a metric, then aggregates the averages computed by all
+    processes.
+
+    Args:
+        total: Total accumulated metric
+        num_samples: Number of samples
+    """
+    # Compute this process's average
+    local_average = total / num_samples
+    local_rank = get_local_rank()
+    local_average_tensor = torch.tensor([local_average], device=local_rank)
+
+    # Aggregate average tensors across all processes
+    stacked_tensor = aggregate_tensors(local_average_tensor)
+
+    # Get aggregated average
+    aggregated_average = torch.mean(stacked_tensor)
+
+    return aggregated_average
