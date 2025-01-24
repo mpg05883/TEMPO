@@ -532,11 +532,6 @@ class Trainer:
         if not os.path.exists(directory):
             os.makedirs(directory)
 
-        # If no file name is specified, then generate name based on loss function
-        is_default_file_name = file_name == "values.csv"
-        if is_default_file_name:
-            file_name = self._get_csv_file_name()
-
         # Create file path to .csv file
         file_path = os.path.join(directory, file_name)
         distributed_print(
@@ -550,8 +545,8 @@ class Trainer:
 
     def _write_and_plot(
         self,
-        csv_file_name,
-        plot_file_name,
+        csv_file_name: str,
+        plot_file_name: str,
         y_true: torch.Tensor,
         y_pred: torch.Tensor = None,
         lower_bounds: torch.Tensor = None,
@@ -661,19 +656,15 @@ class Trainer:
         if not os.path.exists(directory):
             os.makedirs(directory)
 
-        # If no file name is specified, then generate name based on loss function
-        is_default_file_name = file_name == "my_plot.png"
-        if is_default_file_name:
-            file_name = self._get_plot_file_name()
-        plot_file_path = os.path.join(directory, file_name)
+        file_path = os.path.join(directory, file_name)
 
         # Save plot
         distributed_print(
-            f"Saving plot to ./{plot_file_path}",
+            f"Saving plot to ./{file_path}",
             show_gpu=True,
             debug=True,
         )
-        plt.savefig(plot_file_path, bbox_inches="tight")
+        plt.savefig(file_path, bbox_inches="tight")
 
     def _get_plot_file_name(self):
         """
@@ -984,7 +975,7 @@ class Trainer:
         plot_file_name="prob_test_vs_pred.png",
     ):
         """
-        TODO
+        TODO: fill this in
 
         Args:
             plot (bool, optional): _description_. Defaults to True.
@@ -997,50 +988,53 @@ class Trainer:
         Returns:
             _type_: _description_
         """
+        # If --read_values flag is set to True and this is the main process,
+        # then read values from .csv file and create plot before going through
+        # the rest of this method to save time
+        # TODO: remove this once you're done debugging
         if self.args.read_values and is_main_process():
             self._read_and_plot(csv_file_name, plot_file_name)
 
+        # Probability distributions at each future time step
         distributions = torch.tensor([], device=self.local_rank)
+
+        # Predicted values
         y_pred = torch.tensor([], device=self.local_rank)
+
+        # True values
         y_true = torch.tensor([], device=self.local_rank)
+
         upper_bounds = torch.tensor([], device=self.local_rank)
         lower_bounds = torch.tensor([], device=self.local_rank)
         masks = torch.tensor([], device=self.local_rank)
 
+        # Set model to evaluation mode
         self.model.eval()
         with torch.no_grad():
-            self.test_loader.set_epoch(self.iteration)
+            # Set epoch for distributed dataloader
+            self.test_loader.sampler.set_epoch(self.iteration)
 
+            # Only show progress bar on main process
             if is_main_process():
                 progress_bar = tqdm(total=len(self.test_loader))
 
             for data in self.test_loader:
-                batch_x, batch_y, batch_x_mark, batch_y_mark = (
-                    data[0],  # Input time series
-                    data[1],  # Future time series
-                    data[2],
-                    data[3],
-                )
-
-                seq_trend, seq_seasonal, seq_resid = (
-                    data[4],  # Trend component
-                    data[5],  # Seasonal component
-                    data[6],  # Residual component
-                )
-
-                batch_x = batch_x.float().to(self.local_rank)
-                batch_y = batch_y.float().to(self.local_rank)
-                batch_x_mark = batch_x_mark.float().to(self.local_rank)
-                batch_y_mark = batch_y_mark.float().to(self.local_rank)
-
-                seq_trend = seq_trend.float().to(self.local_rank)
-                seq_seasonal = seq_seasonal.float().to(self.local_rank)
-                seq_resid = seq_resid.float().to(self.local_rank)
+                # Unpack data to get tensors
+                (
+                    batch_x,
+                    batch_y_true,
+                    batch_x_mark,
+                    batch_y_mark,
+                    seq_trend,
+                    seq_seasonal,
+                    seq_resid,
+                ) = self._unpack_tensor(data)
 
                 num_channels = batch_x.shape[-1]
 
                 # Compute channel-wise predictions
                 for channel in range(num_channels):
+                    # Compute probability distributions for pred_len future time steps
                     probabilistic_forecasts = self.model.predict_prob(
                         batch_x[:, -self.args.seq_len :, channel : channel + 1],
                         num_samples=self.args.num_samples,
@@ -1074,7 +1068,7 @@ class Trainer:
                     )
 
                     y_true = torch.cat(
-                        (y_true, batch_y[:, :, channel : channel + 1]),
+                        (y_true, batch_y_true[:, :, channel : channel + 1]),
                     )
 
                     masks = torch.cat(
@@ -1087,10 +1081,10 @@ class Trainer:
                     )
 
                 if is_main_process():
-                    progress_bar.update(1)
+                    progress_bar.update(1)  # Update progress bar
 
         if is_main_process():
-            progress_bar.close()
+            progress_bar.close()  # Close progress bar
 
         # Aggregate tensors from all processes
         aggregated_distributions = aggregate_tensors(distributions)
@@ -1106,6 +1100,22 @@ class Trainer:
         aggregated_masks = torch.swapaxes(aggregated_masks.squeeze(), -1, -2)
         target_mask = torch.swapaxes(aggregated_masks.squeeze(), -1, -2)
 
+        # If plot flag is set to True, overwrite_csv flag is set to True, and
+        # this is the main process, then write aggregated_y_true,
+        # aggregated_y_pred, aggregated_lower_bounds, and aggregated_upper_bounds
+        # to the specified .csv file and create the predicted vs true values plot
+        # TODO: remove this once you're done debugging
+        if plot and overwrite_csv and is_main_process():
+            self._write_and_plot(
+                csv_file_name,
+                plot_file_name,
+                aggregated_y_true,
+                aggregated_y_pred,
+                aggregated_lower_bounds,
+                aggregated_upper_bounds,
+            )
+
+        # Compute CRPS sum and CRPS
         crps_sum = calc_quantile_CRPS_sum(
             unormzalized_gt_data,
             aggregated_distributions,
@@ -1121,17 +1131,5 @@ class Trainer:
             mean_scaler=0,
             scaler=1,
         )
-
-        if plot and overwrite_csv and is_main_process():
-            self._write_to_csv_and_plot(
-                csv_file_name,
-                plot_file_name,
-                aggregated_y_true,
-                aggregated_y_pred,
-                aggregated_lower_bounds,
-                aggregated_upper_bounds,
-                batch_index,
-                instance_index,
-            )
 
         return crps_sum, crps
