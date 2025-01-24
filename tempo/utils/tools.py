@@ -520,7 +520,7 @@ def vali(
         pbar.close()
 
     # Get aggregated average validation loss across all processes
-    aggregated_average_vali_loss = aggregate_metric(total_vali_loss, num_samples)
+    aggregated_average_vali_loss = aggregate_metrics(total_vali_loss, num_samples)
 
     # Set to training mode
     if (
@@ -759,10 +759,10 @@ def test(
         )
 
     # Get aggregated average MAE across all processes
-    aggregated_average_mae = aggregate_metric(total_mae, num_samples)
+    aggregated_average_mae = aggregate_metrics(total_mae, num_samples)
 
     # Get aggregated average MSE across all processes
-    aggregated_average_mse = aggregate_metric(total_mse, num_samples)
+    aggregated_average_mse = aggregate_metrics(total_mse, num_samples)
 
     return aggregated_average_mae, aggregated_average_mse
 
