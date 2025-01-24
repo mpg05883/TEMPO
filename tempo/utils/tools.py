@@ -990,7 +990,7 @@ def test_probs(
 
 def get_global_rank() -> int:
     """
-    Returns a process's local rank
+    Returns current process's local rank
 
     Returns:
         int: Current process's local rank
@@ -1000,7 +1000,7 @@ def get_global_rank() -> int:
 
 def get_local_rank() -> int:
     """
-    Returns a process's global rank
+    Returns current process's global rank
 
     Returns:
         int: Current process's global rank
@@ -1037,8 +1037,20 @@ def _format_message(
     show_timestamp: bool = False,
     epoch: int = None,
 ):
+    """
+    Adds epoch number, global rank, and timestamp to message if flags are set
+
+    Args:
+        message (str): _description_
+        show_global_rank (bool, optional): _description_. Defaults to False.
+        show_timestamp (bool, optional): _description_. Defaults to False.
+        epoch (int, optional): _description_. Defaults to None.
+
+    Returns:
+        str: Modified message
+    """
     if epoch is not None:
-        message = f"Epoch {epoch + 1} | {message}"
+        message = f"Epoch {epoch} | {message}"
     if show_global_rank:
         message = f"GPU {get_global_rank()} | {message}"
     if show_timestamp:
@@ -1056,6 +1068,20 @@ def _print_helper(
     critical: bool = False,
     epoch: int = None,
 ):
+    """
+    Formats message and logs the message on the appropriate level based on the
+    flags
+
+    Args:
+        message (str): _description_
+        show_global_rank (bool, optional): _description_. Defaults to False.
+        show_timestamp (bool, optional): _description_. Defaults to False.
+        debug (bool, optional): _description_. Defaults to False.
+        warning (bool, optional): _description_. Defaults to False.
+        error (bool, optional): _description_. Defaults to False.
+        critical (bool, optional): _description_. Defaults to False.
+        epoch (int, optional): _description_. Defaults to None.
+    """
     message = _format_message(message, show_global_rank, show_timestamp, epoch)
     if critical:
         logging.critical(message)
@@ -1084,6 +1110,20 @@ def distributed_print(
     critical: bool = False,
     epoch: int = None,
 ):
+    """
+    Use this to print a message only on the main process
+
+    Args:
+        message (str): _description_
+        to_all (bool, optional): _description_. Defaults to False.
+        show_global_rank (bool, optional): _description_. Defaults to False.
+        show_timestamp (bool, optional): _description_. Defaults to False.
+        debug (bool, optional): _description_. Defaults to False.
+        warning (bool, optional): _description_. Defaults to False.
+        error (bool, optional): _description_. Defaults to False.
+        critical (bool, optional): _description_. Defaults to False.
+        epoch (int, optional): _description_. Defaults to None.
+    """
     if to_all:
         _print_helper(
             message,
@@ -1113,6 +1153,9 @@ def distributed_print(
 
 
 def aggregate_tensors(tensor: torch.Tensor):
+    """
+    Aggregates tensors from multiple processes into one tensor
+    """
     world_size = get_world_size()
     local_rank = get_local_rank()
     tensor_list = [
