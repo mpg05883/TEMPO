@@ -225,11 +225,9 @@ class Trainer:
     def test(
         self,
         plot=True,
-        plot_file_name="pred_vs_true.png",
         overwrite_csv=True,
-        csv_file_name="det_values.csv",
-        batch_index=0,
-        instance_index=0,
+        csv_file_name="prob_values.csv",
+        plot_file_name="prob_test_vs_pred.png",
     ) -> tuple[float, float]:
         """
         Evaluates model on the test set and measures its performance using
@@ -239,20 +237,10 @@ class Trainer:
         Args:
             plot (bool, optional): If True, will plot predicted and true values.
                                    Defaults to True.
-            plot_file_name (str, optional): File name of the predicted vs true
-                                            values plot. Defaults to
-                                            "pred_vs_true.png".
             overwrite_csv (bool, optional): If True, will overwrite the values
                                             previously saved predicted and true
                                             values in the .csv file. Defaults
                                             to True.
-            csv_file_name (str, optional): File name of the .csv file where
-                                           predicted and true values will be
-                                           saved. Defaults to "det_values.csv".
-            batch_index (int, optional): Index of the batch that'll be plotted
-                                         and saved. Defaults to 0.
-            instance_index (int, optional): Index of the instance that'll be
-                                            plotted and saved. Defaults to 0.
 
         Returns:
             tuple[float, float]: (average MAE, average MSE) for deterministic
@@ -262,20 +250,22 @@ class Trainer:
         # If model is probabilistic, then call _test_probs() to compute CRPS sum
         # and CRPs
         if self.args.loss_func != "mse":
-            # Keep default csv file name when name calling _test_probs()
+            # Keep default file names when name calling _test_probs()
+            # TODO: change argument passed to _test_probs() once you finalize it
             return self._test_probs(
                 plot=plot,
-                plot_file_name=plot_file_name,
-                overwrite_csv=True,
-                batch_index=batch_index,
-                instance_index=instance_index,
+                overwrite_csv=overwrite_csv,
             )
 
         # If --read_values flag is set to True and this is the main process,
         # then read values from .csv file and create plot before going through
         # the rest of this method to save time
+        # TODO: remove this once you're done debugging
         if self.args.read_values and is_main_process():
-            self._read_and_plot()
+            self._read_and_plot(
+                csv_file_name=csv_file_name,
+                plot_file_name=plot_file_name,
+            )
 
         y_pred = torch.tensor([], device=self.local_rank)  # Predicted values
         y_true = torch.tensor([], device=self.local_rank)  # True values
@@ -356,14 +346,13 @@ class Trainer:
         # this is the main process, then write aggregated_y_true and
         # aggregated_y_pred to the specified .csv file and create the predicted
         # vs true values plot
+        # TODO: remove this once you're done debugging
         if plot and overwrite_csv and is_main_process():
             self._write_and_plot(
-                csv_file_name,
-                plot_file_name,
-                aggregated_y_true,
-                aggregated_y_pred,
-                batch_index,
-                instance_index,
+                csv_file_name=csv_file_name,
+                plot_file_name=plot_file_name,
+                y_true=aggregated_y_true,
+                y_pred=aggregated_y_pred,
             )
 
         # Compute average MAE and MSE loss across all processes
@@ -434,7 +423,7 @@ class Trainer:
             _type_: _description_
         """
         prefix = "prob" if self._is_prob() else "det"
-        csv_file_name = f"{prefix}_results_{self.iteration}.csv"
+        csv_file_name = f"{prefix}_results.csv"
         return csv_file_name
 
     def _read_columns_from_csv(self, file_name: str, directory="results"):
@@ -475,15 +464,20 @@ class Trainer:
         upper_bounds = df["upper"]
         return (y_true, y_pred, lower_bounds, upper_bounds)
 
-    def _read_and_plot(self):
+    def _read_and_plot(self, csv_file_name: str, plot_file_name: str):
         """
         Combines _read_columns_from_csv() and _create_plot() into one method
         """
-        csv_file_name = self._get_csv_file_name()
         y_true, y_pred, lower_bounds, upper_bounds = self._read_columns_from_csv(
             file_name=csv_file_name
         )
-        self._create_plot(y_true, y_pred, lower_bounds, upper_bounds)
+        self._create_plot(
+            y_true,
+            y_pred,
+            lower_bounds,
+            upper_bounds,
+            file_name=plot_file_name,
+        )
 
     # ========== Writing to .csv files ==========
     def _write_tensors_to_csv(
@@ -556,6 +550,8 @@ class Trainer:
 
     def _write_and_plot(
         self,
+        csv_file_name,
+        plot_file_name,
         y_true: torch.Tensor,
         y_pred: torch.Tensor = None,
         lower_bounds: torch.Tensor = None,
@@ -579,12 +575,14 @@ class Trainer:
             y_pred,
             lower_bounds,
             upper_bounds,
+            file_name=csv_file_name,
         )
         self._create_plot(
             y_true,
             y_pred,
             lower_bounds,
             upper_bounds,
+            file_name=plot_file_name,
         )
 
     # ========== Plotting ==========
@@ -689,7 +687,7 @@ class Trainer:
             str: File name for the true vs predicted values plot
         """
         prefix = "prob" if self._is_prob() else "det"
-        plot_file_name = f"{prefix}_true_vs_pred_{self.iteration}.png"
+        plot_file_name = f"{prefix}_true_vs_pred.png"
         return plot_file_name
 
     # ========== Managing tensors ==========
@@ -981,11 +979,9 @@ class Trainer:
     def _test_probs(
         self,
         plot=True,
-        plot_file_name=None,
         overwrite_csv=True,
         csv_file_name="prob_values.csv",
-        batch_index=0,
-        instance_index=0,
+        plot_file_name="prob_test_vs_pred.png",
     ):
         """
         TODO
@@ -1002,7 +998,7 @@ class Trainer:
             _type_: _description_
         """
         if self.args.read_values and is_main_process():
-            self._read_from_csv_and_plot(csv_file_name, plot_file_name)
+            self._read_and_plot(csv_file_name, plot_file_name)
 
         distributions = torch.tensor([], device=self.local_rank)
         y_pred = torch.tensor([], device=self.local_rank)
