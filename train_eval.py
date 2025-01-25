@@ -24,7 +24,7 @@ from tempo.models.PatchTST import PatchTST
 from tempo.models.T5 import T54TS
 from tempo.models.TEMPO import TEMPO
 from tempo.trainer.trainer import Trainer
-from tempo.utils.tools import EarlyStopping, print_rank_0
+from tempo.utils.tools import EarlyStopping, distributed_print
 
 FIX_SEED = 2021
 random.seed(FIX_SEED)
@@ -95,15 +95,15 @@ def _update_args_from_config(args, config, dataset_name):
 
 
 def print_dataset_info(data, loader, name="Dataset"):
-    print_rank_0(f"\n{name} Info:")
-    print_rank_0(f"- Number of samples: {len(data):,}")
-    print_rank_0(f"- Batch size: {loader.batch_size}")
-    print_rank_0(f"- Number of batches: {len(loader)}")
+    distributed_print(f"\n{name} Info:")
+    distributed_print(f"- Number of samples: {len(data):,}")
+    distributed_print(f"- Batch size: {loader.batch_size}")
+    distributed_print(f"- Number of batches: {len(loader)}")
 
     attributes = ["features", "targets", "shape"]
     for attr in attributes:
         if hasattr(data, attr):
-            print_rank_0(f"- {attr}: {getattr(data, attr)}")
+            distributed_print(f"- {attr}: {getattr(data, attr)}")
 
 
 def prepare_data_loaders(args, config):
@@ -306,13 +306,19 @@ def train_eval(args, config, iteration):
         config: Configuration object for model
         iteration: Current iteration out of args.itr iterations
     """
+    # Load correct model based on the specified architecture
     model = get_model(architecture=args.model)
+
+    # Get dataloaders
     train_loader, val_loader, test_loader = prepare_data_loaders(args, config)
+
+    # Get objective function, optimizer, scheduler, and early stopping objects
     criterion = get_criterion(loss_func=args.loss_func)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     scheduler = CosineAnnealingLR(optimizer, T_max=args.tmax, eta_min=1e-8)
     early_stopping = EarlyStopping(patience=args.patience, verbose=True)
 
+    # Initialize trainer to train and evaluate model
     trainer = Trainer(
         args,
         config,
@@ -327,42 +333,48 @@ def train_eval(args, config, iteration):
         early_stopping,
     )
 
+    # This if branch is only for debugging
     if args.load_checkpoint:
+        # Get trained model's checkpoint based on the loss function
         checkpoint_path = get_checkpoint_path(args.loss_func)
-        print_rank_0(f"\nLoading model from {checkpoint_path}...")
+        distributed_print(f"\nLoading model from {checkpoint_path}...")
+
+        # Load trained model's parameters
         trainer.load_checkpoint(checkpoint_path)
     else:
-        print_rank_0("\nStarting training procedure...")
-        trainer.train()
+        distributed_print("\nStarting training procedure...")
+        trainer.train()  # Train model
 
-    print_rank_0("\nStarting evaluation procedure...")
-    value_1, value_2 = trainer.test()
+    distributed_print("\nStarting evaluation procedure...")
+    value_1, value_2 = trainer.test()  # Evaluate model
     return value_1, value_2
 
 
 def main(args):
+    # If GPU is not avaliable, then end script
     if not torch.cuda.is_available():
-        print(
+        distributed_print(
             "Could not find GPU. At least one GPU is needed to run this script."
-            "\nEnding script..."
+            "\nEnding script...",
+            warning=True,
         )
         return
 
+    # Initialize process group
     ddp_setup()
 
+    # Load configuration
     config = OmegaConf.load(args.config_path)
 
-    if not os.path.exists(args.snapshot_directory):
-        os.makedirs(args.snapshot_directory)
-
-    metric_1 = "Average MAE" if args.loss_func == "mse" else "CRPS Sum"
-    metric_2 = "Average MSE" if args.loss_func == "mse" else "CRPS"
+    # Define metrics to evaluate model based on loss function
+    is_deterministic = args.loss_func == "mse"
+    metric_1 = "Average MAE" if is_deterministic else "CRPS Sum"
+    metric_2 = "Average MSE" if is_deterministic else "CRPS"
 
     start_time = time.time()
 
     for i in range(args.itr):
-        iteration_string = f"Iteration {i + 1}/{args.itr}"
-        print_rank_0(f"\n========== {iteration_string} ==========")
+        distributed_print(f"\n========== Iteration {i}/{args.itr} ==========")
 
         """
         If loss function is set to "mse", then (value_1, value_2) will be
@@ -371,15 +383,19 @@ def main(args):
         Else, (value_1, value_2) will be (crps_sum, crps) 
         """
         value_1, value_2 = train_eval(args, config, i)
-        print_rank_0(f"{iteration_string} {metric_1}: {value_1:.4f}")
-        print_rank_0(f"{iteration_string} {metric_2}: {value_2:.4f}")
+        distributed_print(f"Iteration {i}/{args.itr} {metric_1}: {value_1:.4f}")
+        distributed_print(f"Iteration {i}/{args.itr} {metric_2}: {value_2:.4f}")
 
+        # End loop if a trained model was loaded or values were read from a
+        # .csv file
         if args.get_checkpoint_path or args.read_values:
             break
 
+    # Print elapsed time in minutes
     time_elapsed_min = np.abs((time.time() - start_time) / 60)
-    print_rank_0(f"\nFinished! Time elapsed: {time_elapsed_min:.0f} minutes\n")
+    distributed_print(f"\nFinished! Time elapsed: {time_elapsed_min:.0f} minutes\n")
 
+    # Clean up process groups
     destroy_process_group()
 
 
@@ -395,9 +411,6 @@ bash ./scripts/monash_prob_demo_parallel.sh
 
 Parallel deterministic forecasting script:
 bash ./scripts/monash_demo_parallel.sh
-
-! I think something's wrong with the version of PyTorch in the Conda env bc
-! I can't use any GPUs with it
 """
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

@@ -42,15 +42,17 @@ class Trainer:
         scheduler,
         early_stopping: EarlyStopping,
         snapshots_directory: str = "snapshots",
-        from_scratch: bool = True,  # If True, will train model from scratch
+        from_scratch: bool = False,  # If True, will train model from scratch
     ):
         self.args = args
         self.config = config
         self.iteration = iteration
         self.local_rank = get_local_rank()
         self.global_rank = get_global_rank()
+
         # Move model to GPU
         self.model = model.to(self.local_rank)
+
         # Wrap model with DDP for distributed training and evaluation
         self.model = DDP(self.model, device_ids=[self.local_rank])
         self.train_loader = train_loader
@@ -60,15 +62,22 @@ class Trainer:
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.early_stopping = early_stopping
+
         # Number of epochs ran before training was interrupted
         self.epochs_ran = 0
         self.snapshots_directory = snapshots_directory
+
+        # Create "snapshots" directory if it doesn't exist
         if not os.path.exists(self.snapshots_directory):
             os.makedirs(self.snapshots_directory, exist_ok=True)
+
+        # Create file path where snapshots will be saved
         self.snapshot_path = os.path.join(
             self.snapshots_directory,
             self.args.snapshot_file_name,
         )
+
+        # If we don't want to train the model from scratch, then load a snapshot
         if not from_scratch:
             self._load_snapshot()
 
@@ -80,7 +89,9 @@ class Trainer:
         Args:
             checkpoint_path (str): File path to desired checkpoint
         """
-        distributed_print(f"Loading checkpoint from {checkpoint_path}...")
+        distributed_print(f"Loading checkpoint from ./{checkpoint_path}...")
+
+        # Get checkpoint
         checkpoint = torch.load(checkpoint_path)
 
         # Unwrap model from DDP and load checkpoint
@@ -88,8 +99,8 @@ class Trainer:
 
     def train(self) -> None:
         """
-        Trains model for time series forecasting. Saves a snapshot of the model
-        and training state after each epoch
+        Trains a model for time series forecasting. Saves a snapshot of the
+        model and training state after each epoch
         """
         # Create directory to save model's checkpoints
         settings = self._get_settings(self.args, self.iteration)
@@ -106,8 +117,8 @@ class Trainer:
         )
 
         # Train model for self.args.train_epochs epochs. If training was
-        # interrupted and a previous checkpoint was saved, then resume training
-        # from that checkpoint
+        # interrupted, a previous checkpoint was saved and from_scratch is False,
+        # then resume training from that checkpoint
         for epoch in range(self.epochs_ran, self.args.train_epochs):
             distributed_print(f"\nEpoch {epoch}/{self.args.train_epochs}")
 
@@ -226,8 +237,8 @@ class Trainer:
         self,
         plot=True,
         overwrite_csv=True,
-        csv_file_name="prob_values.csv",
-        plot_file_name="prob_test_vs_pred.png",
+        csv_file_name="det_values.csv",
+        plot_file_name="det_test_vs_pred.png",
     ) -> tuple[float, float]:
         """
         Evaluates model on the test set and measures its performance using
@@ -251,11 +262,11 @@ class Trainer:
         # and CRPs
         if self.args.loss_func != "mse":
             # Keep default file names when name calling _test_probs()
-            # TODO: change argument passed to _test_probs() once you finalize it
-            return self._test_probs(
+            crps_sum, crps = self._test_probs(
                 plot=plot,
                 overwrite_csv=overwrite_csv,
             )
+            return crps_sum, crps
 
         # If --read_values flag is set to True and this is the main process,
         # then read values from .csv file and create plot before going through
@@ -342,17 +353,20 @@ class Trainer:
         aggregated_y_true = aggregate_tensors(y_true)
         aggregated_y_pred = aggregate_tensors(y_pred)
 
-        # If plot flag is set to True, overwrite_csv flag is set to True, and
-        # this is the main process, then write aggregated_y_true and
-        # aggregated_y_pred to the specified .csv file and create the predicted
-        # vs true values plot
-        # TODO: remove this once you're done debugging
-        if plot and overwrite_csv and is_main_process():
-            self._write_and_plot(
-                csv_file_name=csv_file_name,
-                plot_file_name=plot_file_name,
+        # Create plot of true vs predicted values
+        if plot and is_main_process():
+            self._create_plot(
                 y_true=aggregated_y_true,
                 y_pred=aggregated_y_pred,
+                file_name=plot_file_name,
+            )
+
+        # Write true and predicted values to .csv file for debugging
+        if overwrite_csv and is_main_process():
+            self._write_to_csv(
+                y_true=aggregated_y_true,
+                y_pred=aggregated_y_pred,
+                file_name=csv_file_name,
             )
 
         # Compute average MAE and MSE loss across all processes
@@ -371,10 +385,9 @@ class Trainer:
         # If snapshot can't be found, print warning
         if not os.path.exists(self.snapshot_path):
             distributed_print(
-                "Cannot find previous snapshot. Starting training from Epoch 0",
+                "Cannot find previous snapshot! Starting training from Epoch 0",
                 warning=True,
             )
-            self.epochs_ran = 0  # Set epochs ran to 0 just in case
             return
 
         # Load snapshot
@@ -382,7 +395,9 @@ class Trainer:
         snapshot = torch.load(self.snapshot_path, map_location=map_location)
         self.model.load_state_dict(snapshot["MODEL_STATE"])
         self.epochs_ran = snapshot["EPOCHS_RAN"]
-        distributed_print(f"Resuming training from Epoch {self.epochs_ran}")
+        distributed_print(
+            f"Resuming training from Epoch {self.epochs_ran}/{self.args.train_epochs}"
+        )
 
     def _save_snapshot(self, epoch: int) -> None:
         """
@@ -426,7 +441,7 @@ class Trainer:
         csv_file_name = f"{prefix}_results.csv"
         return csv_file_name
 
-    def _read_columns_from_csv(self, file_name: str, directory="results"):
+    def _read_from_csv(self, file_name: str, directory="results"):
         """
         Reads true and predicted values from a .csv file and returns them as
         pandas series. If lower bounds and upper bounds are in the .csv file,
@@ -466,9 +481,9 @@ class Trainer:
 
     def _read_and_plot(self, csv_file_name: str, plot_file_name: str):
         """
-        Combines _read_columns_from_csv() and _create_plot() into one method
+        Combines _read_from_csv() and _create_plot() into one method
         """
-        y_true, y_pred, lower_bounds, upper_bounds = self._read_columns_from_csv(
+        y_true, y_pred, lower_bounds, upper_bounds = self._read_from_csv(
             file_name=csv_file_name
         )
         self._create_plot(
@@ -480,7 +495,7 @@ class Trainer:
         )
 
     # ========== Writing to .csv files ==========
-    def _write_tensors_to_csv(
+    def _write_to_csv(
         self,
         y_true: torch.Tensor,
         y_pred: torch.Tensor = None,
@@ -524,8 +539,7 @@ class Trainer:
             data["lower"] = lower_bounds
             data["upper"] = upper_bounds
 
-        # Create dataframe using true and predicted values (and lower and upper)
-        # bounds if they exist
+        # Create dataframe
         df = pd.DataFrame(data)
 
         # Create "results" directory if it doesn't exist
@@ -553,7 +567,7 @@ class Trainer:
         upper_bounds: torch.Tensor = None,
     ):
         """
-        Combines _write_tensors_to_csv() and _create_plot() into one method
+        Combines _write_to_csv() and _create_plot() into one method
 
         Args:
             csv_file_name (str): _description_
@@ -565,7 +579,7 @@ class Trainer:
             batch_index (int, optional): _description_. Defaults to 0.
             instance_index (int, optional): _description_. Defaults to 0.
         """
-        self._write_tensors_to_csv(
+        self._write_to_csv(
             y_true,
             y_pred,
             lower_bounds,
@@ -718,7 +732,7 @@ class Trainer:
 
     def _unpack_tensor(self, data):
         """
-        Unpacks data into (batch_x, batch_y, batch_x_mark, batch_y_mark,
+        Unpacks data into (batch_x, batch_y_true, batch_x_mark, batch_y_mark,
         seq_trend, seq_seasonal, seq_resid) and moves each tensor to GPU
 
         Args:
@@ -728,7 +742,7 @@ class Trainer:
             tuple: (batch_x, batch_y, batch_x_mark, batch_y_mark,
         seq_trend, seq_seasonal, seq_resid)
         """
-        batch_x, batch_y, batch_x_mark, batch_y_mark = (
+        batch_x, batch_y_true, batch_x_mark, batch_y_mark = (
             data[0],  # Input time series
             data[1],  # Future time series
             data[2],
@@ -743,7 +757,7 @@ class Trainer:
 
         # Move tensors to GPU
         batch_x = batch_x.float().to(self.local_rank)
-        batch_y = batch_y.float().to(self.local_rank)
+        batch_y_true = batch_y_true.float().to(self.local_rank)
         batch_x_mark = batch_x_mark.float().to(self.local_rank)
         batch_y_mark = batch_y_mark.float().to(self.local_rank)
         seq_trend = seq_trend.float().to(self.local_rank)
@@ -752,7 +766,7 @@ class Trainer:
 
         return (
             batch_x,
-            batch_y,
+            batch_y_true,
             batch_x_mark,
             batch_y_mark,
             seq_trend,
@@ -975,7 +989,8 @@ class Trainer:
         plot_file_name="prob_test_vs_pred.png",
     ):
         """
-        TODO: fill this in
+        Evaluates probabilstic model on the test set and measures its
+        performance using CRPS sum and CRPS.
 
         Args:
             plot (bool, optional): _description_. Defaults to True.
@@ -1004,7 +1019,10 @@ class Trainer:
         # True values
         y_true = torch.tensor([], device=self.local_rank)
 
+        # Upper bounds of prediction intervals
         upper_bounds = torch.tensor([], device=self.local_rank)
+
+        # Lower bounds of prediction intervals
         lower_bounds = torch.tensor([], device=self.local_rank)
         masks = torch.tensor([], device=self.local_rank)
 
@@ -1044,22 +1062,15 @@ class Trainer:
                         pred_len=self.args.pred_len,
                     )
 
+                    # Save probability distributions
                     distributions = torch.cat((distributions, probabilistic_forecasts))
 
-                    lower_bounds = torch.cat(
-                        (
-                            lower_bounds,
-                            torch.quantile(probabilistic_forecasts, q=0.025, dim=0),
-                        )
+                    # Save true values
+                    y_true = torch.cat(
+                        (y_true, batch_y_true[:, :, channel : channel + 1]),
                     )
 
-                    upper_bounds = torch.cat(
-                        (
-                            upper_bounds,
-                            torch.quantile(probabilistic_forecasts, q=0.975, dim=0),
-                        )
-                    )
-
+                    # Save predicted values
                     y_pred = torch.cat(
                         (
                             y_pred,
@@ -1067,8 +1078,20 @@ class Trainer:
                         )
                     )
 
-                    y_true = torch.cat(
-                        (y_true, batch_y_true[:, :, channel : channel + 1]),
+                    # Save lower bounds of prediction intervals
+                    lower_bounds = torch.cat(
+                        (
+                            lower_bounds,
+                            torch.quantile(probabilistic_forecasts, q=0.025, dim=0),
+                        )
+                    )
+
+                    # Save upper bounds of prediction intervals
+                    upper_bounds = torch.cat(
+                        (
+                            upper_bounds,
+                            torch.quantile(probabilistic_forecasts, q=0.975, dim=0),
+                        )
                     )
 
                     masks = torch.cat(
@@ -1094,26 +1117,31 @@ class Trainer:
         aggregated_upper_bounds = aggregate_tensors(upper_bounds)
         aggregated_masks = aggregate_tensors(masks)
 
+        # Create plot of true vs predicted values with prediction intervals
+        if plot and is_main_process():
+            self._create_plot(
+                y_true=aggregated_y_true,
+                y_pred=aggregated_y_pred,
+                lower_bounds=aggregated_lower_bounds,
+                upper_bounds=aggregated_upper_bounds,
+                file_name=plot_file_name,
+            )
+
+        # Write true and predicted values, and upper and lower bounds to .csv file
+        if overwrite_csv and is_main_process():
+            self._write_to_csv(
+                y_true=aggregated_y_true,
+                y_pred=aggregated_y_pred,
+                lower_bounds=aggregated_lower_bounds,
+                upper_bounds=aggregated_upper_bounds,
+                file_name=csv_file_name,
+            )
+
         # Swap axes
         aggregated_y_true = torch.swapaxes(aggregated_y_true.squeeze(), -2, -3)
         unormzalized_gt_data = torch.swapaxes(aggregated_y_true.squeeze(), -1, -2)
         aggregated_masks = torch.swapaxes(aggregated_masks.squeeze(), -1, -2)
         target_mask = torch.swapaxes(aggregated_masks.squeeze(), -1, -2)
-
-        # If plot flag is set to True, overwrite_csv flag is set to True, and
-        # this is the main process, then write aggregated_y_true,
-        # aggregated_y_pred, aggregated_lower_bounds, and aggregated_upper_bounds
-        # to the specified .csv file and create the predicted vs true values plot
-        # TODO: remove this once you're done debugging
-        if plot and overwrite_csv and is_main_process():
-            self._write_and_plot(
-                csv_file_name,
-                plot_file_name,
-                aggregated_y_true,
-                aggregated_y_pred,
-                aggregated_lower_bounds,
-                aggregated_upper_bounds,
-            )
 
         # Compute CRPS sum and CRPS
         crps_sum = calc_quantile_CRPS_sum(
