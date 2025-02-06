@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import torch.distributions as dist
 import torch.nn as nn
+from gluonts.tempo.utils.smape import SMAPE
 from numpy.random import choice
 from omegaconf import OmegaConf
 
@@ -18,7 +19,6 @@ from omegaconf import OmegaConf
 from torch.utils.data import Subset
 from tqdm import tqdm
 
-from smape import SMAPE
 from tempo.data_provider.data_factory import data_provider
 from tempo.models.DLinear import DLinear
 from tempo.models.ETSformer import ETSformer

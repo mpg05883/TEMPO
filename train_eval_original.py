@@ -21,7 +21,7 @@ from torch.utils.data import Subset
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
-from smape import SMAPE
+from gluonts.tempo.utils.smape import SMAPE
 from tempo.data_provider.data_factory import data_provider
 from tempo.models.DLinear import DLinear
 from tempo.models.ETSformer import ETSformer

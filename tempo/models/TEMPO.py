@@ -7,6 +7,9 @@ import torch.distributions as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
+from gluonts.model.forecast_generator import DistributionForecastGenerator
+from gluonts.torch.distributions import StudentTOutput
+from gluonts.torch.model.predictor import PyTorchPredictor
 from huggingface_hub import hf_hub_download
 from omegaconf import OmegaConf
 from peft import LoraConfig, get_peft_model
@@ -507,7 +510,14 @@ class TEMPO(nn.Module):
                 return x
 
     def forward(self, x, itr=0, trend=None, season=None, noise=None, test=False):
-        B, L, M = x.shape  # 4, 512, 1
+        """
+        Computes a forward pass of the TEMPO model.
+
+        Return:
+            (mu, sigma, nu), loss_local if model is probabilistic
+            outputs, loss_local if model is deterministic
+        """
+        B, L, M = x.shape  # batch size, sequence length, number of features
 
         x = self.rev_in_trend(x, "norm")
 
@@ -636,9 +646,14 @@ class TEMPO(nn.Module):
             mu = self.mu(outputs)
             sigma = F.softplus(self.sigma(outputs)) + 1e-6  # Ensure scale is positive
             nu = F.softplus(self.nu(outputs)) + 2  # Ensure degrees of freedom > 2
+            student_T_arguments = (
+                mu,  # Location
+                sigma,  # Scale
+                nu,  # Degrees of freedom
+            )  # Parameters for student's t-distribution
             if test:
-                return (mu, sigma, nu), None
-            return (mu, sigma, nu), loss_local
+                return student_T_arguments, None
+            return student_T_arguments, loss_local
         elif self.loss_func == "negative_binomial":
             mu = F.softplus(self.mu(x)) + 1e-4  # Ensure mean is positive
             alpha = F.softplus(self.alpha(x)) + 1e-4  # Ensure dispersion is positive
