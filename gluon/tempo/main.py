@@ -10,7 +10,7 @@ from omegaconf import OmegaConf
 
 
 def main(args):
-    # Load configuration
+    # Load model configuration
     config = OmegaConf.load(args.config_path)
 
     # Load built-in dataset from GluonTS
@@ -49,7 +49,7 @@ bash ./scripts/monash_demo_parallel.sh
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Trains and evaluates model for time series forecasting"
+        description="Trains and evaluates TEMPO model for time series forecasting"
     )
     parser.add_argument(
         "--model_id",
@@ -113,12 +113,13 @@ if __name__ == "__main__":
         "--lradj",
         type=str,
         default="type3",
+        help="",  # ? learning rate adjustment?
     )
     parser.add_argument(
         "--patience",
         type=int,
         default=5,
-        help="Number of times to try and get a lower validation loss before"
+        help="Number of attempts to get a lower validation loss before"
         "prematurely ending training",
     )
     parser.add_argument(
