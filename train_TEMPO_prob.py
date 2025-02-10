@@ -11,7 +11,6 @@ import numpy as np
 import torch
 import torch.distributions as dist
 import torch.nn as nn
-from gluonts.tempo.utils.smape import SMAPE
 from numpy.random import choice
 from omegaconf import OmegaConf
 
@@ -365,7 +364,7 @@ def main(args):
         # Load model
         if args.load_finetuned_model:
             # Initialize TEMPO model
-            model = TEMPO(args, device)
+            model = TEMPO(args)
 
             # Load finetuned model's parameters
             model.load_state_dict(
@@ -378,7 +377,7 @@ def main(args):
             elif args.model == "DLinear":
                 model = DLinear(args, device)
             elif args.model == "TEMPO":
-                model = TEMPO(args, device)
+                model = TEMPO(args)
             elif args.model == "T5":
                 model = T54TS(args, device)
             elif "ETSformer" in args.model:
@@ -402,8 +401,6 @@ def main(args):
             # Set loss function
             if args.loss_func == "mse":
                 criterion = nn.MSELoss()
-            elif args.loss_func == "smape":
-                criterion = SMAPE()
             elif args.loss_func == "prob":
                 criterion = studentT_nll
             elif args.loss_func == "negative_binomial":
@@ -450,6 +447,8 @@ def main(args):
 
                     # Clear gradients
                     model_optim.zero_grad()
+                    
+                    print(f'batch_x.shape: {batch_x.shape}')
 
                     # Compute forward pass
                     if args.model == "TEMPO" or "multi" in args.model:
@@ -472,6 +471,8 @@ def main(args):
                         outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                     else:
                         outputs = model(batch_x, itr)
+                        
+                    print(f'Student\'s t arguments shape: {outputs[0].shape}')
 
                     # Compute current batch's loss
                     if (
@@ -561,24 +562,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Trains and evaluates proabilistic forecasting model"
     )
-
     parser.add_argument(
         "--model_id",
         type=str,
         default="weather_GTP4TS_multi-debug",
     )
-
     # Get path where model will be saved after training
     checkpoints_dir = "checkpoints"
-    checkpoints_subdirs = [name for name in os.listdir(checkpoints_dir)]
-
-    # name of desired model's directory
-    checkpoint = checkpoints_subdirs[0]
-    checkpoints_path = os.path.join(checkpoints_dir, checkpoint)
+    
+    if not os.path.exists(checkpoints_dir):
+        os.makedirs(checkpoints_dir)
+    
     parser.add_argument(
         "--checkpoints",
         type=str,
-        default=checkpoints_path,
         help="Directory path where model will be saved",
     )
     parser.add_argument(
@@ -626,7 +623,7 @@ if __name__ == "__main__":
         default=1,
         help="Number of training epochs",
     )
-    parser.add_argument("--lradj", type=str, default="type3")  # for what
+    parser.add_argument("--lradj", type=str, default="type3")  
     parser.add_argument("--patience", type=int, default=5)
     parser.add_argument("--gpt_layers", type=int, default=6)
     parser.add_argument("--is_gpt", type=int, default=1)
@@ -740,7 +737,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--load_finetuned_model",
         type=bool,
-        default=True,
+        default=False,
         help="Set to true load fine-tuned TEMPO model",
     )
     finetuned_model_checkpoint = os.path.join(checkpoints_dir, "Monash_1")
@@ -761,7 +758,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--read_values",
         type=bool,
-        default=True,
+        default=False,
         help="Set to True to read predicted and true values from a .csv file",
     )
     parser.add_argument(

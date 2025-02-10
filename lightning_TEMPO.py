@@ -1,4 +1,4 @@
-import lightning.pytorch as pl
+import pytorch_lightning as pl
 import torch
 from gluonts.torch import PyTorchPredictor
 from gluonts.torch.distributions import StudentTOutput
@@ -7,8 +7,8 @@ from tempo.models.TEMPO import TEMPO
 
 
 class LightningTEMPO(TEMPO, pl.LightningModule):
-    def __init__(self, args, config, distr_output=StudentTOutput()):
-        super().__init__(args, config)
+    def __init__(self, args, config):
+        super().__init__(config)
         # Commmand line arguments
         self.args = args
 
@@ -17,12 +17,13 @@ class LightningTEMPO(TEMPO, pl.LightningModule):
 
         # TODO: once you get a prototype working, change the code to allow for different output distributions
         # Type of distribution for model output. Default is Student's t-distribution
-        self.distr_output = distr_output
+        self.distr_output = StudentTOutput()
 
     def training_step(self, batch, batch_index):
         """
         Defines the logic for a single training loop iteration.
         """
+        
         # Past time series values
         past_target = batch["past_target"]
 
@@ -47,6 +48,7 @@ class LightningTEMPO(TEMPO, pl.LightningModule):
         """
         Defines the logic for a single validation loop iteration.
         """
+        
         pass
 
     # TODO:
@@ -54,6 +56,7 @@ class LightningTEMPO(TEMPO, pl.LightningModule):
         """
         Defines a single test iteration.
         """
+        
         pass
 
     def configure_optimizers(self):

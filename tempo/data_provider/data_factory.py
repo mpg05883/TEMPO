@@ -1,5 +1,4 @@
 from torch.utils.data import DataLoader
-from torch.utils.data.distributed import DistributedSampler
 
 from tempo.data_provider.data_loader import (
     Dataset_Custom,
@@ -25,26 +24,24 @@ def data_provider(args, flag, drop_last_test=True, train_all=False):
     percent = args.percent
     max_len = args.max_len
 
-    # Set `shuffle` to False when using DistributedSampler
-    shuffle_flag = False
     if flag == "test":
-        # shuffle_flag = False
+        shuffle_flag = False
         drop_last = drop_last_test
         batch_size = args.batch_size
         freq = args.freq
     elif flag == "pred":
-        # shuffle_flag = False
+        shuffle_flag = False
         drop_last = False
         batch_size = args.batch_size
         freq = args.freq
         Data = Dataset_Pred
     elif flag == "val":
-        # shuffle_flag = True
+        shuffle_flag = True
         drop_last = drop_last_test
         batch_size = args.batch_size
         freq = args.freq
     else:
-        # shuffle_flag = True
+        shuffle_flag = True
         drop_last = True
         batch_size = args.batch_size
         freq = args.freq
@@ -63,16 +60,11 @@ def data_provider(args, flag, drop_last_test=True, train_all=False):
         train_all=train_all,
         data_name=args.data_name,
     )
-
-    # Initialize DistributedSampler for parallel computing
-    sampler = DistributedSampler(data_set)
-
+    # print(flag, len(data_set))
     data_loader = DataLoader(
         data_set,
         batch_size=batch_size,
         shuffle=shuffle_flag,
-        num_workers=args.num_workers,
         drop_last=drop_last,
-        sampler=sampler,
     )
     return data_set, data_loader

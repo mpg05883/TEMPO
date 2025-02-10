@@ -61,7 +61,7 @@ echo -e "$log_path"
 
 # python train_eval.py \
 # MASTER_PORT=29503 torchrun --nproc_per_node=2 train_TEMPO_prob_parallel.py \
-python train_eval.py \
+python train_TEMPO_prob.py \
     --datasets ETTh2 \
     --eval_data ETTm1 \
     --target_data ETTh2 \

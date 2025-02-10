@@ -1,36 +1,51 @@
 import argparse
+import logging
 import os
 
-import lightning.pytorch as pl
+import pytorch_lightning as pl
 from gluonts.dataset.loader import TrainDataLoader
 from gluonts.dataset.repository import get_dataset
 from gluonts.torch.batchify import batchify
-from lightning_TEMPO import LightningTEMPO
 from omegaconf import OmegaConf
+from tempo.utils.data import prepare_data
+
+
+from lightning_TEMPO import LightningTEMPO
+
+# Configure logger
+logging.basicConfig(level=logging.DEBUG, format="%(message)s")
 
 
 def main(args):
     # Load model configuration
-    config = OmegaConf.load(args.config_path)
+    data_config = OmegaConf.load("./configs/multiple_datasets.yml")
+    logging.debug("Loaded config")
 
-    # Load built-in dataset from GluonTS
-    dataset = get_dataset("electricity")
-
-    # Initialize training set's data loader
-    train_data_loader = TrainDataLoader(
-        dataset=dataset.train,
-        batch_size=args.batch_size,
-        stack_fn=batchify,
-    )
-
+    # Load dataloaders
+    (
+        _,  # train_data
+        train_loader,
+        _,  # val_data
+        val_loader,
+        _,  # test_data
+        test_loader,
+    ) = prepare_data(args, data_config)
+    
+    model_config = OmegaConf.load("./configs/run_TEMPO.yml")
+    logging.debug("Loaded config")
+    
     # Initialize TEMPO model
-    model = LightningTEMPO(args, config)
+    model = LightningTEMPO(args, model_config)
+    logging.debug("Loaded model")
 
     # Initialize PyTorch Lightning trainer
     trainer = pl.Trainer(max_epochs=args.train_epochs)
+    logging.debug("Loaded trainer")
 
     # Train model
-    trainer.fit(model, train_data_loader)
+    trainer.fit(model, train_loader)
+
+    logging.debug("Trained model")
 
 
 """
@@ -256,7 +271,7 @@ if __name__ == "__main__":
         type=float,
         default=0.01,
     )
-    configs_directory = "../../configs"
+    configs_directory = "configs"
     tempo_config = "run_TEMPO.yml"
     tempo_config_path = os.path.join(configs_directory, tempo_config)
 
