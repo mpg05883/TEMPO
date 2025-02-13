@@ -127,7 +127,8 @@ def print_dataset_info(data, loader, name="Dataset"):
 
 def prepare_data_loaders(args, config):
     """
-    Prepare train, validation and test data loaders.
+    Prepares and returns datasets and dataloaders for training, validation, and
+    testing.
 
     Args:
         args: Arguments containing dataset configurations
@@ -136,58 +137,89 @@ def prepare_data_loaders(args, config):
     Returns:
         tuple: (train_data, train_loader, test_data, test_loader, val_data, val_loader)
     """
-    train_datas = []
-    val_datas = []
-    min_sample_num = sys.maxsize
+    # Each element is a different training dataset
+    train_datasets = []
+    
+    # Each element is a different validation dataset
+    val_datasets = []
+    
+    # Minimum number of samples to use from each dataset 
+    min_sample_num = sys.maxsize  # Initialize to a very high value
+    
+    # Datasets to exclude from equal sampling
+    excluded_datasets = ["ETTh1", "ETTh2", "ILI", "exchange", "monash"]
 
-    # First pass to get validation data and minimum sample number
+    # First pass: identify smallest training dataset
     for dataset_name in args.datasets.split(","):
+        # Update command line arguments using dataset-specific configurations
+        # ? Does this return the updated args?
         _update_args_from_config(args, config, dataset_name)
 
+        # Load training set and dataloader
         train_data, train_loader = data_provider(args, "train")
-        if dataset_name not in ["ETTh1", "ETTh2", "ILI", "exchange", "monash"]:
-            min_sample_num = min(min_sample_num, len(train_data))
+        
+        # Update minimum sample number
+        if dataset_name not in excluded_datasets:
+            num_samples = len(train_data)  # Number of samples in training set
+            min_sample_num = min(min_sample_num, num_samples)
 
+    # Load validation datasets
     for dataset_name in args.eval_data.split(","):
+        # Update command line arguments using dataset-specific configurations
         _update_args_from_config(args, config, dataset_name)
+        
+        # Get validation set and dataloader 
         val_data, val_loader = data_provider(args, "val")
-        val_datas.append(val_data)
+        
+        # Add validation set to list of validation datasets
+        val_datasets.append(val_data)
 
-    # Second pass to prepare training data with proper sampling
+    # Second pass: prepare training data with proper sampling
     for dataset_name in args.datasets.split(","):
+        # Update command line arguments using dataset-specific configurations
         _update_args_from_config(args, config, dataset_name)
 
+        # Get training set (ignore training dataloader)
         train_data, _ = data_provider(args, "train")
-
-        if (
-            dataset_name not in ["ETTh1", "ETTh2", "ILI", "exchange", "monash"]
-            and args.equal == 1
-        ):
-            train_data = Subset(train_data, choice(len(train_data), min_sample_num))
-
-        if args.equal == 1:
-            if dataset_name == "electricity" and args.electri_multiplier > 1:
-                train_data = Subset(
-                    train_data,
-                    choice(
-                        len(train_data), int(min_sample_num * args.electri_multiplier)
-                    ),
-                )
+        
+        # True if args.equal is set to 1 (i.e. we want equal sampling)
+        equal_sampling = args.equal == 1
+        
+        # Perform equal sampling
+        if equal_sampling:
+            num_samples = len(train_data)  # Number of samples in training set
+            
+            if dataset_name not in excluded_datasets:
+                # Randomly select min_num_sample indices from num_samples
+                selected_indices =  choice(num_samples, min_sample_num)
+            
+            elif dataset_name == "electricity" and args.electri_multiplier > 1:
+                # Scale min number of samples
+                scaled_min_sample_num = int(min_sample_num * args.electri_multiplier)
+                
+                # Randomly select scaled_min_sample_num indices from num_samples
+                selected_indices = choice(num_samples, scaled_min_sample_num)
+                
             elif dataset_name == "traffic" and args.traffic_multiplier > 1:
-                train_data = Subset(
-                    train_data,
-                    choice(
-                        len(train_data), int(min_sample_num * args.traffic_multiplier)
-                    ),
-                )
+                # Scale min number of samples
+                scaled_min_sample_num = int(min_sample_num * args.traffic_multiplier)
+                
+                # Randomly select scaled_min_sample_num indices from num_samples
+                selected_indices = choice(num_samples, scaled_min_sample_num)
+            
+            # Get subset of randomly selected elements from train_data
+            train_data = Subset(train_data, selected_indices)
+        
+        # Add training set to list of training datasets
+        train_datasets.append(train_data)
 
-        train_datas.append(train_data)
+    # If there are multiple datasets, then combine them
+    if len(train_datasets) > 1:
+        train_data = _combine_datasets(train_datasets)
+        val_data = _combine_datasets(val_datasets)
 
-    # Combine datasets if multiple exist
-    if len(train_datas) > 1:
-        train_data = _combine_datasets(train_datas)
-        val_data = _combine_datasets(val_datas)
-
+        # Create dataloaders
+        # ? Why is this indented? It wouldn't run if there was only one training set
         train_loader = torch.utils.data.DataLoader(
             train_data,
             batch_size=args.batch_size,
@@ -205,6 +237,7 @@ def prepare_data_loaders(args, config):
     _update_args_from_config(args, config, args.target_data)
     test_data, test_loader = data_provider(args, "test")
 
+    # Print dataset info
     print_dataset_info(train_data, train_loader, "Training Dataset")
     print_dataset_info(val_data, val_loader, "Validation Dataset")
     print_dataset_info(test_data, test_loader, "Test Dataset")
@@ -213,8 +246,15 @@ def prepare_data_loaders(args, config):
 
 
 def _update_args_from_config(args, config, dataset_name):
-    """Update args with dataset specific configurations"""
+    """
+    Update the command line arguments with dataset-specific configurations 
+    from config.
+    """
+
+    # Get the configuration for the specified dataset name
     dataset_config = config["datasets"][dataset_name]
+    
+    # Update args with the corresponding values from dataset_config
     for key in [
         "data",
         "root_path",
@@ -229,12 +269,17 @@ def _update_args_from_config(args, config, dataset_name):
     ]:
         setattr(args, key, getattr(dataset_config, key))
 
+    # If frequency is set to 0, then set it to h (hourly)
     if args.freq == 0:
         args.freq = "h"
+        
+    # ? does this operate on args in place? or should args be returned?
 
 
 def _combine_datasets(datasets):
-    """Combine multiple datasets into one"""
+    """
+    Combine multiple datasets into one
+    """
     combined = datasets[0]
     for dataset in datasets[1:]:
         combined = torch.utils.data.ConcatDataset([combined, dataset])
@@ -353,6 +398,8 @@ def main(args):
             vali_data,
             vali_loader,
         ) = prepare_data_loaders(args, config)
+        print(f'train data type: {type(train_data)}')
+        print(f'is train data iterable? {iter(train_data)}')
 
         # Get number of training steps
         train_steps = len(train_loader)

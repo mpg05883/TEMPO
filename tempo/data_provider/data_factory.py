@@ -60,7 +60,7 @@ def data_provider(args, flag, drop_last_test=True, train_all=False):
         train_all=train_all,
         data_name=args.data_name,
     )
-    # print(flag, len(data_set))
+    print(f"data set type: {data_set}")
     data_loader = DataLoader(
         data_set,
         batch_size=batch_size,
