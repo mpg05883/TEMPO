@@ -11,12 +11,8 @@ import torch.nn as nn
 from gluonts.tempo.utils.smape import SMAPE
 from numpy.random import choice
 from omegaconf import OmegaConf
-from torch.distributed import (
-    barrier,
-    destroy_process_group,
-    get_world_size,
-    init_process_group,
-)
+from torch.distributed import (barrier, destroy_process_group, get_world_size,
+                               init_process_group)
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import Subset
 from torch.utils.data.distributed import DistributedSampler

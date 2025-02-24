@@ -23,7 +23,7 @@ class LightningTEMPO(TEMPO, pl.LightningModule):
         """
         Defines the logic for a single training loop iteration.
         """
-        
+
         # Past time series values
         past_target = batch["past_target"]
 
@@ -48,7 +48,7 @@ class LightningTEMPO(TEMPO, pl.LightningModule):
         """
         Defines the logic for a single validation loop iteration.
         """
-        
+
         pass
 
     # TODO:
@@ -56,7 +56,7 @@ class LightningTEMPO(TEMPO, pl.LightningModule):
         """
         Defines a single test iteration.
         """
-        
+
         pass
 
     def configure_optimizers(self):

@@ -10,18 +10,11 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torchmetrics import MeanAbsoluteError, MeanSquaredError
 from tqdm import tqdm
-from utils.tools import (
-    EarlyStopping,
-    adjust_learning_rate,
-    aggregate_metrics,
-    aggregate_tensors,
-    calc_quantile_CRPS,
-    calc_quantile_CRPS_sum,
-    distributed_print,
-    get_global_rank,
-    get_local_rank,
-    is_main_process,
-)
+from utils.tools import (EarlyStopping, adjust_learning_rate,
+                         aggregate_metrics, aggregate_tensors,
+                         calc_quantile_CRPS, calc_quantile_CRPS_sum,
+                         distributed_print, get_global_rank, get_local_rank,
+                         is_main_process)
 
 # Hide matplotlib warnings
 logging.getLogger("matplotlib").setLevel(logging.WARNING)

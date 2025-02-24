@@ -2,14 +2,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from einops import rearrange
-from peft import (
-    LoraConfig,
-    PeftConfig,
-    PeftModel,
-    TaskType,
-    get_peft_config,
-    get_peft_model,
-)
+from peft import (LoraConfig, PeftConfig, PeftModel, TaskType, get_peft_config,
+                  get_peft_model)
 from torch import optim
 from transformers import BertModel, BertTokenizer
 from transformers.models.gpt2.configuration_gpt2 import GPT2Config

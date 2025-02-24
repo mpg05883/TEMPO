@@ -6,18 +6,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from tempo.layers.AutoCorrelation import AutoCorrelation, AutoCorrelationLayer
-from tempo.layers.Autoformer_EncDec import (
-    Decoder,
-    DecoderLayer,
-    Encoder,
-    EncoderLayer,
-    my_Layernorm,
-    series_decomp,
-)
+from tempo.layers.Autoformer_EncDec import (Decoder, DecoderLayer, Encoder,
+                                            EncoderLayer, my_Layernorm,
+                                            series_decomp)
 from tempo.layers.Embed import (  # ,DataEmbedding_wo_pos_temp,DataEmbedding_wo_temp
-    DataEmbedding,
-    DataEmbedding_wo_pos,
-)
+    DataEmbedding, DataEmbedding_wo_pos)
 
 
 class Autoformer(nn.Module):

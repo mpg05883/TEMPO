@@ -25,15 +25,9 @@ from tempo.models.GPT4TS import GPT4TS
 from tempo.models.PatchTST import PatchTST
 from tempo.models.T5 import T54TS
 from tempo.models.TEMPO import TEMPO
-from tempo.utils.tools import (
-    EarlyStopping,
-    EarlyStopping_dist,
-    adjust_learning_rate,
-    test,
-    test_probs,
-    vali,
-    visual,
-)
+from tempo.utils.tools import (EarlyStopping, EarlyStopping_dist,
+                               adjust_learning_rate, test, test_probs, vali,
+                               visual)
 
 # def setup(rank, world_size):
 #     dist.init_process_group("nccl", rank=rank, world_size=world_size)

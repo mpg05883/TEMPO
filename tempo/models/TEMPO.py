@@ -45,9 +45,7 @@ def print_trainable_parameters(model):
         all_param += param.numel()
         if param.requires_grad:
             trainable_params += param.numel()
-    print(
-        f"Trainable params: {trainable_params} || All params: {all_param}"
-    )
+    print(f"Trainable params: {trainable_params} || All params: {all_param}")
 
 
 class MultiFourier(torch.nn.Module):
@@ -301,15 +299,17 @@ class TEMPO(nn.Module):
         self.loss_func = configs.loss_func
         if self.loss_func == "prob":
             # Create output layers for Student's t-distribution parameters
-            studentT_output_layer = nn.Linear(configs.pred_len, configs.pred_len)  
-            
+            studentT_output_layer = nn.Linear(configs.pred_len, configs.pred_len)
+
             self.mu = studentT_output_layer  # Mean
             self.sigma = studentT_output_layer  # Scale (standard deviation)
             self.nu = studentT_output_layer  # Degrees of freedom
         elif self.loss_func == "negative_binomial":
             # Create output layers for Negative Binomial parameters
-            negative_binomial_output_layer = nn.Linear(configs.pred_len, configs.pred_len)
-            
+            negative_binomial_output_layer = nn.Linear(
+                configs.pred_len, configs.pred_len
+            )
+
             self.mu = negative_binomial_output_layer  # Mean
             self.alpha = negative_binomial_output_layer
 
@@ -518,16 +518,16 @@ class TEMPO(nn.Module):
         # Ensure input is three dimensional (batch_size, seq_len, num_features)
         if x.dim() < 3:
             x = torch.unsqueeze(x, -1)
-            
+
         # Get batch size (B), sequence length (L), and number of features (M)
-        B, L, M = x.shape  
-        
-        # Normalize the input time series 
+        B, L, M = x.shape
+
+        # Normalize the input time series
         x = self.rev_in_trend(x, "norm")
 
-        # Compute trend component 
+        # Compute trend component
         trend_local = self.moving_avg(x)
-        
+
         # Perform linear transformation on trend component
         trend_local = self.map_trend(trend_local.squeeze(2)).unsqueeze(2)
 
@@ -539,15 +539,15 @@ class TEMPO(nn.Module):
 
         # Compute residual component
         noise_local = x - trend_local - season_local
-        
+
         # Initialize local loss
         loss_local = None
-        
+
         if trend is not None:
             trend, _, _ = self.get_norm(trend)
             season, _, _ = self.get_norm(season)
             noise, _, _ = self.get_norm(noise)
-            
+
             trend_local_l = criterion(trend, trend_local)
             season_local_l = criterion(season, season_local)
             noise_local_l = criterion(noise, noise_local)
@@ -558,16 +558,18 @@ class TEMPO(nn.Module):
         trend = self.get_patch(trend_local)
         season = self.get_patch(season_local)
         noise = self.get_patch(noise_local)
-        
-        # Project patches into hidden space 
-        trend = self.in_layer_trend(trend)  
-        season = self.in_layer_season(season)  
+
+        # Project patches into hidden space
+        trend = self.in_layer_trend(trend)
+        season = self.in_layer_season(season)
         noise = self.in_layer_noise(noise)
-        
+
         if self.is_gpt and self.prompt:
             trend = self.get_emb(trend, self.gpt2_trend_token["input_ids"], "Trend")
             season = self.get_emb(season, self.gpt2_season_token["input_ids"], "Season")
-            noise = self.get_emb(noise, self.gpt2_residual_token["input_ids"], "Residual")
+            noise = self.get_emb(
+                noise, self.gpt2_residual_token["input_ids"], "Residual"
+            )
         else:
             trend = self.get_emb(trend)
             season = self.get_emb(season)
@@ -581,7 +583,13 @@ class TEMPO(nn.Module):
 
         if self.prompt:
             trend = x[:, : self.token_len + self.patch_num, :]
-            season = x[:, self.token_len + self.patch_num : 2 * self.token_len + 2 * self.patch_num, :]
+            season = x[
+                :,
+                self.token_len
+                + self.patch_num : 2 * self.token_len
+                + 2 * self.patch_num,
+                :,
+            ]
             noise = x[:, 2 * self.token_len + 2 * self.patch_num :, :]
             if not self.use_token:
                 trend = trend[:, self.token_len :, :]
@@ -594,42 +602,42 @@ class TEMPO(nn.Module):
 
         # Get predicted trend, seasonal, and residual components
         # Here, the components have shape (B * M, pred_len)
-        trend = self.out_layer_trend(trend.reshape(B * M, -1))  
+        trend = self.out_layer_trend(trend.reshape(B * M, -1))
         season = self.out_layer_season(season.reshape(B * M, -1))
-        noise = self.out_layer_noise(noise.reshape(B * M, -1)) 
-        
+        noise = self.out_layer_noise(noise.reshape(B * M, -1))
+
         # Reshape components from (B * M, pred_len) to (B, pred_len, M)
-        trend = rearrange(trend, "(b m) l -> b l m", b=B)  
-        season = rearrange(season, "(b m) l -> b l m", b=B)  
+        trend = rearrange(trend, "(b m) l -> b l m", b=B)
+        season = rearrange(season, "(b m) l -> b l m", b=B)
         noise = rearrange(noise, "(b m) l -> b l m", b=B)
 
         # Construct predicted forecast by adding trend, season, and residual
-        outputs = trend + season + noise  
+        outputs = trend + season + noise
 
         # Denormalize output
         outputs = self.rev_in_trend(outputs, "denorm")
-        
+
         # If loss function is Student's t-distribution NLL:
-        if self.loss_func == "prob":           
+        if self.loss_func == "prob":
             # Set distribution output to Student's t-distribution
             distr_output = StudentTOutput()
-            
+
             # Create layer to project outputs to Student's t parameters
             args_proj = distr_output.get_args_proj(M)
-            
-            # Convert outputs into Student's t-distribution parameters 
+
+            # Convert outputs into Student's t-distribution parameters
             distr_args = args_proj(outputs)  # (mu, sigma, nu)
-            
-            return distr_args, loss_local           
+
+            return distr_args, loss_local
 
         # if self.loss_func == "prob":
         #     outputs = rearrange(outputs, "b l m-> b m l", b=B).squeeze()
-            
+
         #     # TODO: use outputs to create Student's t-distribution arguments
 
         #     print(f"Loss func: {self.loss_func}")
         #     print(f'outputs shape: {outputs.shape}')
-            
+
         #     mu = self.mu(outputs)
         #     sigma = F.softplus(self.sigma(outputs)) + 1e-6  # Ensure scale is positive
         #     nu = F.softplus(self.nu(outputs)) + 2  # Ensure degrees of freedom > 2

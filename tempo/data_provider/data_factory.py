@@ -1,13 +1,9 @@
 from torch.utils.data import DataLoader
 
-from tempo.data_provider.data_loader import (
-    Dataset_Custom,
-    Dataset_ETT_hour,
-    Dataset_ETT_minute,
-    Dataset_Monash,
-    Dataset_Pred,
-    Dataset_TSF,
-)
+from tempo.data_provider.data_loader import (Dataset_Custom, Dataset_ETT_hour,
+                                             Dataset_ETT_minute,
+                                             Dataset_Monash, Dataset_Pred,
+                                             Dataset_TSF)
 
 data_dict = {
     "custom": Dataset_Custom,
@@ -19,33 +15,35 @@ data_dict = {
 
 
 def data_provider(args, flag, drop_last_test=True, train_all=False):
+    # Get dataset object
     Data = data_dict[args.data]
     timeenc = 0 if args.embed != "timeF" else 1
+
+    # Percent of samples to use
     percent = args.percent
+
+    # Max time series length
     max_len = args.max_len
 
     if flag == "test":
         shuffle_flag = False
         drop_last = drop_last_test
-        batch_size = args.batch_size
-        freq = args.freq
     elif flag == "pred":
         shuffle_flag = False
         drop_last = False
-        batch_size = args.batch_size
-        freq = args.freq
         Data = Dataset_Pred
     elif flag == "val":
         shuffle_flag = True
         drop_last = drop_last_test
-        batch_size = args.batch_size
-        freq = args.freq
     else:
         shuffle_flag = True
         drop_last = True
-        batch_size = args.batch_size
-        freq = args.freq
 
+    # Initialize batch size and frequency
+    batch_size = args.batch_size
+    freq = args.freq
+
+    # Initialize dataset
     data_set = Data(
         root_path=args.root_path,
         data_path=args.data_path,
@@ -61,6 +59,8 @@ def data_provider(args, flag, drop_last_test=True, train_all=False):
         data_name=args.data_name,
     )
     print(f"data set type: {data_set}")
+
+    # initialize  data loader
     data_loader = DataLoader(
         data_set,
         batch_size=batch_size,

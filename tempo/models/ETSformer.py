@@ -2,13 +2,8 @@ import torch
 import torch.nn as nn
 
 from tempo.layers.Embed import DataEmbedding
-from tempo.layers.ETSformer_EncDec import (
-    Decoder,
-    DecoderLayer,
-    Encoder,
-    EncoderLayer,
-    Transform,
-)
+from tempo.layers.ETSformer_EncDec import (Decoder, DecoderLayer, Encoder,
+                                           EncoderLayer, Transform)
 
 
 class ETSformer(nn.Module):

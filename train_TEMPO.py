@@ -22,7 +22,8 @@ from tempo.models.GPT4TS import GPT4TS
 from tempo.models.PatchTST import PatchTST
 from tempo.models.T5 import T54TS
 from tempo.models.TEMPO import TEMPO
-from tempo.utils.tools import EarlyStopping, adjust_learning_rate, test, vali, visual
+from tempo.utils.tools import (EarlyStopping, adjust_learning_rate, test, vali,
+                               visual)
 
 
 def get_init_config(config_path=None):

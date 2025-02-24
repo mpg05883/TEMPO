@@ -45,12 +45,12 @@ def main(args):
         test_data,
         test_loader,
     ) = prepare_data(args, config)
-    
-    print(f'train_data type: {type(train_data)}')
-    print(f'train_loader type: {type(train_loader)}')
-    
+
+    print(f"train_data type: {type(train_data)}")
+    print(f"train_loader type: {type(train_loader)}")
+
     original_dataset = train_loader.dataset
-    print(f'original_dataset type: {type(original_dataset)}')
+    print(f"original_dataset type: {type(original_dataset)}")
 
 
 """

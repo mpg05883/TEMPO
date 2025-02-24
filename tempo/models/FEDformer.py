@@ -3,20 +3,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from tempo.layers.AutoCorrelation import AutoCorrelationLayer
-from tempo.layers.Autoformer_EncDec import (
-    Decoder,
-    DecoderLayer,
-    Encoder,
-    EncoderLayer,
-    my_Layernorm,
-    series_decomp,
-)
+from tempo.layers.Autoformer_EncDec import (Decoder, DecoderLayer, Encoder,
+                                            EncoderLayer, my_Layernorm,
+                                            series_decomp)
 from tempo.layers.Embed import DataEmbedding
 from tempo.layers.FourierCorrelation import FourierBlock, FourierCrossAttention
-from tempo.layers.MultiWaveletCorrelation import (
-    MultiWaveletCross,
-    MultiWaveletTransform,
-)
+from tempo.layers.MultiWaveletCorrelation import (MultiWaveletCross,
+                                                  MultiWaveletTransform)
 
 
 class FEDformer(nn.Module):

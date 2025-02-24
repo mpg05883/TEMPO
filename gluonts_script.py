@@ -7,10 +7,9 @@ from gluonts.dataset.loader import TrainDataLoader
 from gluonts.dataset.repository import get_dataset
 from gluonts.torch.batchify import batchify
 from omegaconf import OmegaConf
-from tempo.utils.data import prepare_data
-
 
 from lightning_TEMPO import LightningTEMPO
+from tempo.utils.data import prepare_data
 
 # Configure logger
 logging.basicConfig(level=logging.DEBUG, format="%(message)s")
@@ -30,10 +29,10 @@ def main(args):
         _,  # test_data
         test_loader,
     ) = prepare_data(args, data_config)
-    
+
     model_config = OmegaConf.load("./configs/run_TEMPO.yml")
     logging.debug("Loaded config")
-    
+
     # Initialize TEMPO model
     model = LightningTEMPO(args, model_config)
     logging.debug("Loaded model")

@@ -13,7 +13,6 @@ import torch.distributions as dist
 import torch.nn as nn
 from numpy.random import choice
 from omegaconf import OmegaConf
-
 # from torch import optim
 from torch.utils.data import Subset
 from tqdm import tqdm
@@ -25,7 +24,8 @@ from tempo.models.GPT4TS import GPT4TS
 from tempo.models.PatchTST import PatchTST
 from tempo.models.T5 import T54TS
 from tempo.models.TEMPO import TEMPO
-from tempo.utils.tools import EarlyStopping, adjust_learning_rate, test_probs, vali
+from tempo.utils.tools import (EarlyStopping, adjust_learning_rate, test_probs,
+                               vali)
 
 warnings.filterwarnings("ignore")
 
@@ -125,6 +125,31 @@ def print_dataset_info(data, loader, name="Dataset"):
     #     break
 
 
+def perform_equal_sampling(dataset_name, train_data, min_sample_num, args):
+    # Number of samples in the training set
+    num_samples = len(train_data)
+
+    # Randomly select min_num_sample indices from num_samples
+    selected_indices = choice(num_samples, min_sample_num)
+
+    if dataset_name == "electricity" and args.electri_multiplier > 1:
+        # Scale the minimum number of samples to use based on the multiplier
+        scaled_min_sample_num = int(min_sample_num * args.electri_multiplier)
+
+        # Randomly select scaled_min_sample_num indices from num_samples
+        selected_indices = choice(num_samples, scaled_min_sample_num)
+
+    elif dataset_name == "traffic" and args.traffic_multiplier > 1:
+        # Scale the minimum number of samples to use based on the multiplier
+        scaled_min_sample_num = int(min_sample_num * args.traffic_multiplier)
+
+        # Randomly select scaled_min_sample_num indices from num_samples
+        selected_indices = choice(num_samples, scaled_min_sample_num)
+
+    # Get a subset of randomly selected elements from train_data
+    return Subset(train_data, selected_indices)
+
+
 def prepare_data_loaders(args, config):
     """
     Prepares and returns datasets and dataloaders for training, validation, and
@@ -139,77 +164,70 @@ def prepare_data_loaders(args, config):
     """
     # Each element is a different training dataset
     train_datasets = []
-    
+
     # Each element is a different validation dataset
     val_datasets = []
-    
-    # Minimum number of samples to use from each dataset 
-    min_sample_num = sys.maxsize  # Initialize to a very high value
-    
-    # Datasets to exclude from equal sampling
-    excluded_datasets = ["ETTh1", "ETTh2", "ILI", "exchange", "monash"]
 
-    # First pass: identify smallest training dataset
-    for dataset_name in args.datasets.split(","):
+    # Minimum number of samples to use from each dataset
+    min_sample_num = sys.maxsize  # Initialize to a very high value
+
+    # Datasets to exclude from equal sampling
+    excluded_datasets = {"ETTh1", "ETTh2", "ILI", "exchange", "monash"}
+
+    train_dataset_names = args.datasets.split(",")
+
+    # First pass: identify the smallest training dataset
+    for dataset_name in train_dataset_names:
         # Update command line arguments using dataset-specific configurations
         # ? Does this return the updated args?
         _update_args_from_config(args, config, dataset_name)
 
-        # Load training set and dataloader
-        train_data, train_loader = data_provider(args, "train")
-        
-        # Update minimum sample number
-        if dataset_name not in excluded_datasets:
-            num_samples = len(train_data)  # Number of samples in training set
-            min_sample_num = min(min_sample_num, num_samples)
+        # Load training set
+        train_data, _ = data_provider(args, "train")
+
+        # If the current dataset should be excluded from equal sampling, then
+        # jump to the next iteration
+        if dataset_name in excluded_datasets:
+            continue
+
+        num_train_samples = len(train_data)
+
+        # Update the minimum sample number
+        min_sample_num = min(min_sample_num, num_train_samples)
+
+    eval_dataset_names = args.eval_data.split(",")
 
     # Load validation datasets
-    for dataset_name in args.eval_data.split(","):
+    for dataset_name in eval_dataset_names:
         # Update command line arguments using dataset-specific configurations
+        # ? Isn't this redundant?
         _update_args_from_config(args, config, dataset_name)
-        
-        # Get validation set and dataloader 
-        val_data, val_loader = data_provider(args, "val")
-        
-        # Add validation set to list of validation datasets
+
+        # Get validation set
+        val_data, _ = data_provider(args, "val")
+
+        # Add current validation set to list of validation datasets
         val_datasets.append(val_data)
 
     # Second pass: prepare training data with proper sampling
-    for dataset_name in args.datasets.split(","):
+    for dataset_name in train_dataset_names:
         # Update command line arguments using dataset-specific configurations
+        # ? Isn't this redundant?
         _update_args_from_config(args, config, dataset_name)
 
-        # Get training set (ignore training dataloader)
+        # Get training set
         train_data, _ = data_provider(args, "train")
-        
+
         # True if args.equal is set to 1 (i.e. we want equal sampling)
         equal_sampling = args.equal == 1
-        
-        # Perform equal sampling
-        if equal_sampling:
-            num_samples = len(train_data)  # Number of samples in training set
-            
-            if dataset_name not in excluded_datasets:
-                # Randomly select min_num_sample indices from num_samples
-                selected_indices =  choice(num_samples, min_sample_num)
-            
-            elif dataset_name == "electricity" and args.electri_multiplier > 1:
-                # Scale min number of samples
-                scaled_min_sample_num = int(min_sample_num * args.electri_multiplier)
-                
-                # Randomly select scaled_min_sample_num indices from num_samples
-                selected_indices = choice(num_samples, scaled_min_sample_num)
-                
-            elif dataset_name == "traffic" and args.traffic_multiplier > 1:
-                # Scale min number of samples
-                scaled_min_sample_num = int(min_sample_num * args.traffic_multiplier)
-                
-                # Randomly select scaled_min_sample_num indices from num_samples
-                selected_indices = choice(num_samples, scaled_min_sample_num)
-            
-            # Get subset of randomly selected elements from train_data
-            train_data = Subset(train_data, selected_indices)
-        
+
+        # If equal_sampling is true, then perform equal sampling
+        not_excluded_dataset = dataset_name not in excluded_datasets
+        if equal_sampling and not_excluded_dataset:
+            train_data = perform_equal_sampling(
+                dataset_name, train_data, min_sample_num, args
+            )
+
         # Add training set to list of training datasets
         train_datasets.append(train_data)
 
@@ -218,20 +236,20 @@ def prepare_data_loaders(args, config):
         train_data = _combine_datasets(train_datasets)
         val_data = _combine_datasets(val_datasets)
 
-        # Create dataloaders
-        # ? Why is this indented? It wouldn't run if there was only one training set
-        train_loader = torch.utils.data.DataLoader(
-            train_data,
-            batch_size=args.batch_size,
-            shuffle=True,
-            num_workers=args.num_workers,
-        )
-        val_loader = torch.utils.data.DataLoader(
-            val_data,
-            batch_size=args.batch_size,
-            shuffle=False,
-            num_workers=args.num_workers,
-        )
+    # Create dataloaders
+    # ? Why is this indented? It wouldn't run if there was only one training set
+    train_loader = torch.utils.data.DataLoader(
+        train_data,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+    )
+    val_loader = torch.utils.data.DataLoader(
+        val_data,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+    )
 
     # Prepare test data
     _update_args_from_config(args, config, args.target_data)
@@ -247,13 +265,13 @@ def prepare_data_loaders(args, config):
 
 def _update_args_from_config(args, config, dataset_name):
     """
-    Update the command line arguments with dataset-specific configurations 
+    Updates the command line arguments with dataset-specific configurations
     from config.
     """
 
     # Get the configuration for the specified dataset name
     dataset_config = config["datasets"][dataset_name]
-    
+
     # Update args with the corresponding values from dataset_config
     for key in [
         "data",
@@ -272,7 +290,7 @@ def _update_args_from_config(args, config, dataset_name):
     # If frequency is set to 0, then set it to h (hourly)
     if args.freq == 0:
         args.freq = "h"
-        
+
     # ? does this operate on args in place? or should args be returned?
 
 
@@ -398,8 +416,8 @@ def main(args):
             vali_data,
             vali_loader,
         ) = prepare_data_loaders(args, config)
-        print(f'train data type: {type(train_data)}')
-        print(f'is train data iterable? {iter(train_data)}')
+        print(f"train data type: {type(train_data)}")
+        print(f"is train data iterable? {iter(train_data)}")
 
         # Get number of training steps
         train_steps = len(train_loader)
@@ -494,8 +512,8 @@ def main(args):
 
                     # Clear gradients
                     model_optim.zero_grad()
-                    
-                    print(f'batch_x.shape: {batch_x.shape}')
+
+                    print(f"batch_x.shape: {batch_x.shape}")
 
                     # Compute forward pass
                     if args.model == "TEMPO" or "multi" in args.model:
@@ -518,8 +536,8 @@ def main(args):
                         outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                     else:
                         outputs = model(batch_x, itr)
-                        
-                    print(f'Student\'s t arguments shape: {outputs[0].shape}')
+
+                    print(f"Student's t arguments shape: {outputs[0].shape}")
 
                     # Compute current batch's loss
                     if (
@@ -616,10 +634,10 @@ if __name__ == "__main__":
     )
     # Get path where model will be saved after training
     checkpoints_dir = "checkpoints"
-    
+
     if not os.path.exists(checkpoints_dir):
         os.makedirs(checkpoints_dir)
-    
+
     parser.add_argument(
         "--checkpoints",
         type=str,
@@ -670,7 +688,7 @@ if __name__ == "__main__":
         default=1,
         help="Number of training epochs",
     )
-    parser.add_argument("--lradj", type=str, default="type3")  
+    parser.add_argument("--lradj", type=str, default="type3")
     parser.add_argument("--patience", type=int, default=5)
     parser.add_argument("--gpt_layers", type=int, default=6)
     parser.add_argument("--is_gpt", type=int, default=1)
