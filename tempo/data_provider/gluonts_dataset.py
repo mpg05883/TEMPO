@@ -13,13 +13,13 @@ np.random.seed(SEED)
 
 def _update_args_from_config(args, config, dataset_name):
     """
-    Updates the command line arguments with dataset-specific configurations
-    from config.
+    Updates the command line arguments in place with dataset-specific
+    configurations from config.
     """
 
     # Get the configuration for the specified dataset name
     dataset_config = config["datasets"][dataset_name]
-    
+
     keys = [
         "data",
         "root_path",
@@ -41,9 +41,6 @@ def _update_args_from_config(args, config, dataset_name):
     if args.freq == 0:
         args.freq = "h"
 
-    # ? does this operate on args in place? or should args be returned?
-    return args
-
 
 def _combine_datasets(datasets):
     """
@@ -61,38 +58,37 @@ def get_min_num_samples(args, config, train_dataset_names, excluded_datasets):
     the smallest number of samples
 
     Args:
+        args: Arguments containing dataset configurations
+        config: Configuration dictionary
         train_dataset_names: A list of all training dataset names
         excluded_datasets: A set of dataset names to exclude from computing
                            min_num_samples
 
     Returns:
-        tuple: (train_dataset, val_dataset, test_dataset)
+        min_num_samples: The minimum number of samples to use for each dataset
     """
-    # Initialize to a very high value
+    # Initialize minimum number of samples to a very high value
     min_num_samples = sys.maxsize
-
-    updated_args = args
 
     for dataset_name in train_dataset_names:
         # Update command line arguments using dataset-specific configurations
-        # ? Does this return the updated args?
-        updated_args = _update_args_from_config(args, config, dataset_name)
+        _update_args_from_config(args, config, dataset_name)
 
         # Load training set
-        # TODO: read the code in data_provider
-        train_data, _ = data_provider(args, "train")
+        train_dataset, _ = data_provider(args, "train")
 
-        # If the current dataset should be excluded from equal sampling, then
-        # jump to the next iteration
+        # If current dataset should be excluded from equal sampling, jump to
+        # next iteration
         if dataset_name in excluded_datasets:
             continue
 
-        num_train_samples = len(train_data)
+        # Get number of samples in training set
+        num_train_samples = len(train_dataset)
 
-        # Update the minimum sample number
+        # Update minimum sample number
         min_sample_num = min(min_sample_num, num_train_samples)
 
-    return min_num_samples, updated_args
+    return min_num_samples
 
 
 def perform_equal_sampling(dataset_name, train_data, min_sample_num, args):
@@ -103,14 +99,14 @@ def perform_equal_sampling(dataset_name, train_data, min_sample_num, args):
     selected_indices = choice(num_samples, min_sample_num)
 
     if dataset_name == "electricity" and args.electri_multiplier > 1:
-        # Scale the minimum number of samples to use based on the multiplier
+        # Scale the minimum number of samples to select based on the multiplier
         scaled_min_sample_num = int(min_sample_num * args.electri_multiplier)
 
         # Randomly select scaled_min_sample_num indices from num_samples
         selected_indices = choice(num_samples, scaled_min_sample_num)
 
     elif dataset_name == "traffic" and args.traffic_multiplier > 1:
-        # Scale the minimum number of samples to use based on the multiplier
+        # Scale the minimum number of samples to select based on the multiplier
         scaled_min_sample_num = int(min_sample_num * args.traffic_multiplier)
 
         # Randomly select scaled_min_sample_num indices from num_samples
@@ -122,7 +118,7 @@ def perform_equal_sampling(dataset_name, train_data, min_sample_num, args):
 
 def get_GluonTS_datasets(args, config):
     """
-    Prepares and returns GluonTS datasets for training validation and testing.
+    Prepares and returns GluonTS datasets for training, validation, and testing.
 
     If multiple datasets are listed in args, then they're combined into one
     aggregate dataset.
@@ -146,14 +142,15 @@ def get_GluonTS_datasets(args, config):
     # Datasets to exclude from equal sampling
     excluded_datasets = {"ETTh1", "ETTh2", "ILI", "exchange", "monash"}
 
-    # Names of the training datasets
+    # Get the names of the the training datasets
     train_dataset_names = args.datasets.split(",")
 
-    # Names of the validation datasets
+    # Get the names of the validation datasets
     eval_dataset_names = args.eval_data.split(",")
 
-    # Get the minimum number of samples to use from each dataset
-    min_num_samples, args = get_min_num_samples(
+    # Get the minimum number of samples across all training datasets and update
+    # args using dataset-specific configurations
+    min_num_samples = get_min_num_samples(
         args,
         config,
         train_dataset_names,
@@ -163,6 +160,7 @@ def get_GluonTS_datasets(args, config):
     # Get all training datasets
     for dataset_name in train_dataset_names:
         # Get current training set
+        # TODO: read the code in data_provider
         train_dataset, _ = data_provider(args, "train")
 
         # True if args.equal is set to 1 (i.e. we want equal sampling)
@@ -201,7 +199,7 @@ def get_GluonTS_datasets(args, config):
         train_data = train_datasets[0]
         val_data = val_datasets[0]
 
-    # Get test set
+    # Get the test set
     test_data, _ = data_provider(args, "test")
 
     # TODO: use train_data, val_data, and test_data to create GluonTS datasets

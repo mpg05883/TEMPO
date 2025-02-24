@@ -211,6 +211,7 @@ class Dataset_Monash(Dataset):
 
 
 class Dataset_ETT_hour(Dataset):
+    # Constructor
     def __init__(
         self,
         root_path,
@@ -227,8 +228,7 @@ class Dataset_ETT_hour(Dataset):
         max_len=-1,
         train_all=False,
     ):
-        # size [seq_len, label_len, pred_len]
-        # info
+        # Extract sequence length, label length, and prediction length
         if size == None:
             self.seq_len = 24 * 4 * 4
             self.label_len = 24 * 4
@@ -237,26 +237,42 @@ class Dataset_ETT_hour(Dataset):
             self.seq_len = size[0]
             self.label_len = size[1]
             self.pred_len = size[2]
-        # init
+
+        # Make sure flag is a valid choice
         assert flag in ["train", "test", "val"]
         type_map = {"train": 0, "val": 1, "test": 2}
+
+        # Get the correct split based on type (train, val, or test)
         self.set_type = type_map[flag]
 
+        # Percent of the dataset to use
         self.percent = percent
+
+        # Independent variables
         self.features = features
+
+        # Dependent variable
         self.target = target
+
+        # Set to true to scale the data
         self.scale = scale
         self.timeenc = timeenc
+
+        # Time series frequency
         self.freq = freq
 
+        # Path to the root directory
         self.root_path = root_path
+
+        # Name of the CSV file to read
         self.data_path = data_path
+
+        # Name of the dataset
         self.data_name = data_name
         self.__read_data__()
 
         self.enc_in = self.data_x.shape[-1]
-        # print("self.enc_in = {}".format(self.enc_in))
-        # print("self.data_x = {}".format(self.data_x.shape))
+
         self.tot_len = len(self.data_x) - self.seq_len - self.pred_len + 1
 
     def stl_resolve(self, data_raw, data_name):
@@ -325,50 +341,74 @@ class Dataset_ETT_hour(Dataset):
         return trend_stamp, seasonal_stamp, resid_stamp
 
     def __read_data__(self):
+        # Initialize standard scaler
         self.scaler = StandardScaler()
+
+        # Read the CSV file
         df_raw = pd.read_csv(os.path.join(self.root_path, self.data_path))
 
+        # Define the indices where each split starts
         border1s = [
-            0,
-            12 * 30 * 24 - self.seq_len,
-            12 * 30 * 24 + 4 * 30 * 24 - self.seq_len,
+            0,  # Start of training split
+            12 * 30 * 24 - self.seq_len,  # Start of validation split
+            12 * 30 * 24 + 4 * 30 * 24 - self.seq_len,  # Start of test split
         ]
-        border2s = [
-            12 * 30 * 24,
-            12 * 30 * 24 + 4 * 30 * 24,
-            12 * 30 * 24 + 8 * 30 * 24,
-        ]
-        border1 = border1s[self.set_type]
-        border2 = border2s[self.set_type]
 
+        # Define the indices where each split ends
+        border2s = [
+            12 * 30 * 24,  # End of training split
+            12 * 30 * 24 + 4 * 30 * 24,  # End of validation split
+            12 * 30 * 24 + 8 * 30 * 24,  # End of test split
+        ]
+
+        # Select the right split (train, val, or test) based on self.set_type
+        border1 = border1s[self.set_type]  # Starting index
+        border2 = border2s[self.set_type]  # Ending index
+
+        # If training set
         if self.set_type == 0:
+            # Select self.percent to select a fraction of the training set
             border2 = (border2 - self.seq_len) * self.percent // 100 + self.seq_len
 
+        # "M" or "MS" means "multi-feature mode"
         if self.features == "M" or self.features == "MS":
+            # Exclude date column
             cols_data = df_raw.columns[1:]
             df_data = df_raw[cols_data]
+
+        # "S" means "single-feature"
         elif self.features == "S":
+            # Only use the target column
             df_data = df_raw[[self.target]]
 
+        # If scale is set to true
         if self.scale:
+            # Extract the training data from the dataframe
             train_data = df_data[border1s[0] : border2s[0]]
+
+            # Apply the scaler to the data
             self.scaler.fit(train_data.values)
             data = self.scaler.transform(df_data.values)
         else:
             data = df_data.values
 
+        # Extract the timestamp column and convert it to a datetime object
         df_stamp = df_raw[["date"]][border1:border2]
         df_stamp["date"] = pd.to_datetime(df_stamp.date)
 
-        # After we get data, we do the stl resolve
-        col_date = df_raw.columns[:1]
-        df_time = df_raw[col_date]
-        data_raw = pd.DataFrame.join(df_time, pd.DataFrame(data))  # [border1:border2]
+        # Prepare data for STL decomposition
+        col_date = df_raw.columns[:1]  # Extract date column
+        df_time = df_raw[col_date]  # Create a data frame with just the date
+
+        # Combine the date column and the data columns
+        data_raw = pd.DataFrame.join(df_time, pd.DataFrame(data))
+
+        # Perform Seasonal-Trend Decomposition (STL)
         trend_stamp, seasonal_stamp, resid_stamp = self.stl_resolve(
             data_raw=data_raw, data_name=self.data_name
         )
-        # end -dove
 
+        # Encode timestamps
         if self.timeenc == 0:
             df_stamp["month"] = df_stamp.date.apply(lambda row: row.month, 1)
             df_stamp["day"] = df_stamp.date.apply(lambda row: row.day, 1)
@@ -381,10 +421,16 @@ class Dataset_ETT_hour(Dataset):
             )
             data_stamp = data_stamp.transpose(1, 0)
 
+        # Features
         self.data_x = data[border1:border2]
+
+        # Targets
         self.data_y = data[border1:border2]
+
+        # Encoded timestamps
         self.data_stamp = data_stamp
 
+        # STL decomposed components
         self.trend_stamp = trend_stamp[border1:border2]
         self.seasonal_stamp = seasonal_stamp[border1:border2]
         self.resid_stamp = resid_stamp[border1:border2]
@@ -455,9 +501,14 @@ class Dataset_ETT_minute(Dataset):
         self.root_path = root_path
         self.data_path = data_path
         self.data_name = data_name
+
+        # Read data from csv file
         self.__read_data__()
 
+        # Encoder input
         self.enc_in = self.data_x.shape[-1]
+
+        # Total number of training samples in the dataset
         self.tot_len = len(self.data_x) - self.seq_len - self.pred_len + 1
 
     def stl_resolve(self, data_raw, data_name):

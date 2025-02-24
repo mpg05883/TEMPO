@@ -5,6 +5,7 @@ from tempo.data_provider.data_loader import (Dataset_Custom, Dataset_ETT_hour,
                                              Dataset_Monash, Dataset_Pred,
                                              Dataset_TSF)
 
+# TODO: read the code for the custom datasets
 data_dict = {
     "custom": Dataset_Custom,
     "tsf_data": Dataset_TSF,
@@ -15,8 +16,9 @@ data_dict = {
 
 
 def data_provider(args, flag, drop_last_test=True, train_all=False):
-    # Get dataset object
+    # data_dict[args.data] determines which dataset class to instantiate later
     Data = data_dict[args.data]
+
     timeenc = 0 if args.embed != "timeF" else 1
 
     # Percent of samples to use
@@ -25,6 +27,7 @@ def data_provider(args, flag, drop_last_test=True, train_all=False):
     # Max time series length
     max_len = args.max_len
 
+    # Initialize arguments for dataloaders
     if flag == "test":
         shuffle_flag = False
         drop_last = drop_last_test
@@ -38,10 +41,7 @@ def data_provider(args, flag, drop_last_test=True, train_all=False):
     else:
         shuffle_flag = True
         drop_last = True
-
-    # Initialize batch size and frequency
     batch_size = args.batch_size
-    freq = args.freq
 
     # Initialize dataset
     data_set = Data(
@@ -52,7 +52,7 @@ def data_provider(args, flag, drop_last_test=True, train_all=False):
         features=args.features,
         target=args.target,
         timeenc=timeenc,
-        freq=freq,
+        freq=args.freq,
         percent=percent,
         max_len=max_len,
         train_all=train_all,
@@ -60,7 +60,7 @@ def data_provider(args, flag, drop_last_test=True, train_all=False):
     )
     print(f"data set type: {data_set}")
 
-    # initialize  data loader
+    # initialize data loader
     data_loader = DataLoader(
         data_set,
         batch_size=batch_size,
