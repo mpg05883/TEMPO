@@ -821,3 +821,16 @@ class TEMPO(nn.Module):
             probabilistic_forecast = sample_negative_binomial(mu, alpha, num_samples)
 
         return probabilistic_forecast
+    
+    def get_predictor(self, prediction_length, batch_size, input_transform):
+        """
+        Returns a GluonTS PyTorch predictor for performing inference.
+        """
+        return PyTorchPredictor(
+            prediction_length=prediction_length,  
+            input_names=["x"],  
+            prediction_net=self,  
+            batch_size=batch_size, 
+            input_transform=input_transform, 
+            forecast_generator=DistributionForecastGenerator(self.distr_output)
+        )
