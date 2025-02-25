@@ -507,38 +507,44 @@ class TEMPO(nn.Module):
             else:
                 return x
 
-    def forward(self, x, itr=0, trend=None, season=None, noise=None, test=False):
+    def forward(self, past_target, itr=0, trend=None, season=None, noise=None, test=False):
         """
         Computes a forward pass of the TEMPO model.
 
         Return:
             (mu, sigma, nu), loss_local if model is probabilistic
             outputs, loss_local if model is deterministic
-        """
+        """               
         # Ensure input is three dimensional (batch_size, seq_len, num_features)
-        if x.dim() < 3:
-            x = torch.unsqueeze(x, -1)
+        if past_target.dim() == 1:
+            past_target = past_target[-336:]  # Shape becomes [336]
 
+            # Add batch and feature dimensions
+            past_target = past_target.unsqueeze(0).unsqueeze(-1)  # Now (1, 336, 1)
+            
+        elif past_target.dim() == 2:
+            past_target = torch.unsqueeze(past_target, -1)
+        
         # Get batch size (B), sequence length (L), and number of features (M)
-        B, L, M = x.shape
+        B, L, M = past_target.shape
 
         # Normalize the input time series
-        x = self.rev_in_trend(x, "norm")
+        past_target = self.rev_in_trend(past_target, "norm")
 
         # Compute trend component
-        trend_local = self.moving_avg(x)
+        trend_local = self.moving_avg(past_target)
 
         # Perform linear transformation on trend component
         trend_local = self.map_trend(trend_local.squeeze(2)).unsqueeze(2)
 
         # Compute seaonal component by subtracting the trend from the input
-        season_local = x - trend_local
+        season_local = past_target - trend_local
 
         # Perform non-linear transformation on seasonal component
         season_local = self.map_season(season_local.squeeze(2)).unsqueeze(2)
 
         # Compute residual component
-        noise_local = x - trend_local - season_local
+        noise_local = past_target - trend_local - season_local
 
         # Initialize local loss
         loss_local = None
@@ -576,29 +582,29 @@ class TEMPO(nn.Module):
             noise = self.get_emb(noise)
 
         # Concatenate trend, seasonal, and residual component embeddings
-        x_all = torch.cat((trend, season, noise), dim=1)
+        past_target_all = torch.cat((trend, season, noise), dim=1)
 
         # Perform forward pass through GPT-2 model
-        x = self.gpt2_trend(inputs_embeds=x_all).last_hidden_state
+        past_target = self.gpt2_trend(inputs_embeds=past_target_all).last_hidden_state
 
         if self.prompt:
-            trend = x[:, : self.token_len + self.patch_num, :]
-            season = x[
+            trend = past_target[:, : self.token_len + self.patch_num, :]
+            season = past_target[
                 :,
                 self.token_len
                 + self.patch_num : 2 * self.token_len
                 + 2 * self.patch_num,
                 :,
             ]
-            noise = x[:, 2 * self.token_len + 2 * self.patch_num :, :]
+            noise = past_target[:, 2 * self.token_len + 2 * self.patch_num :, :]
             if not self.use_token:
                 trend = trend[:, self.token_len :, :]
                 season = season[:, self.token_len :, :]
                 noise = noise[:, self.token_len :, :]
         else:
-            trend = x[:, : self.patch_num, :]
-            season = x[:, self.patch_num : 2 * self.patch_num, :]
-            noise = x[:, 2 * self.patch_num :, :]
+            trend = past_target[:, : self.patch_num, :]
+            season = past_target[:, self.patch_num : 2 * self.patch_num, :]
+            noise = past_target[:, 2 * self.patch_num :, :]
 
         # Get predicted trend, seasonal, and residual components
         # Here, the components have shape (B * M, pred_len)
@@ -627,8 +633,12 @@ class TEMPO(nn.Module):
 
             # Convert outputs into Student's t-distribution parameters
             distr_args = args_proj(outputs)  # (mu, sigma, nu)
+            
+            loc = torch.zeros(size=(distr_args[0].shape[0], 1))
+            
+            scale = loc
 
-            return distr_args, loss_local
+            return distr_args, loc, scale
 
         # if self.loss_func == "prob":
         #     outputs = rearrange(outputs, "b l m-> b m l", b=B).squeeze()
@@ -653,8 +663,8 @@ class TEMPO(nn.Module):
         #         return student_T_arguments, loss_local
         #     return student_T_arguments, loss_local
         elif self.loss_func == "negative_binomial":
-            mu = F.softplus(self.mu(x)) + 1e-4  # Ensure mean is positive
-            alpha = F.softplus(self.alpha(x)) + 1e-4  # Ensure dispersion is positive
+            mu = F.softplus(self.mu(past_target)) + 1e-4  # Ensure mean is positive
+            alpha = F.softplus(self.alpha(past_target)) + 1e-4  # Ensure dispersion is positive
             if test:
                 return (
                     mu.permute(0, 2, 1),
@@ -822,13 +832,13 @@ class TEMPO(nn.Module):
 
         return probabilistic_forecast
     
-    def get_predictor(self, prediction_length, batch_size, input_transform):
+    def get_predictor(self, input_transform, prediction_length=96, batch_size=128):
         """
         Returns a GluonTS PyTorch predictor for performing inference.
         """
         return PyTorchPredictor(
             prediction_length=prediction_length,  
-            input_names=["x"],  
+            input_names=["past_target"],  
             prediction_net=self,  
             batch_size=batch_size, 
             input_transform=input_transform, 
