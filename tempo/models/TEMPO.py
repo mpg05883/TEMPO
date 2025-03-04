@@ -1,12 +1,10 @@
 import os
-import pdb
 import warnings
 
 import numpy as np
 import torch
 import torch.distributions as dist
 import torch.nn as nn
-import torch.nn.functional as F
 from einops import rearrange
 from gluonts.model.forecast_generator import DistributionForecastGenerator
 from gluonts.torch.distributions import StudentTOutput
@@ -21,82 +19,15 @@ from transformers.models.gpt2.modeling_gpt2 import GPT2Model
 from tempo.utils.rev_in import RevIn
 from tempo.utils.tools import sample_negative_binomial
 
-criterion = nn.MSELoss()
-
-
-class ComplexLinear(nn.Module):
-    def __init__(self, input_dim, output_dim):
-        super(ComplexLinear, self).__init__()
-        self.fc_real = nn.Linear(input_dim, output_dim)
-        self.fc_imag = nn.Linear(input_dim, output_dim)
-
-    def forward(self, x):
-        x_real = torch.real(x)
-        x_imag = torch.imag(x)
-        out_real = self.fc_real(x_real) - self.fc_imag(x_imag)
-        out_imag = self.fc_real(x_imag) + self.fc_imag(x_real)
-        return torch.complex(out_real, out_imag)
-
-
-def print_trainable_parameters(model):
-    trainable_params = 0
-    all_param = 0
-    for _, param in model.named_parameters():
-        all_param += param.numel()
-        if param.requires_grad:
-            trainable_params += param.numel()
-    print(f"Trainable params: {trainable_params} || All params: {all_param}")
-
-
-class MultiFourier(torch.nn.Module):
-    def __init__(self, N, P):
-        super(MultiFourier, self).__init__()
-        self.N = N
-        self.P = P
-        self.a = torch.nn.Parameter(torch.randn(max(N), len(N)), requires_grad=True)
-        self.b = torch.nn.Parameter(torch.randn(max(N), len(N)), requires_grad=True)
-
-    def forward(self, t):
-        output = torch.zeros_like(t)
-        t = t.unsqueeze(-1).repeat(
-            1, 1, max(self.N)
-        )  # shape: [batch_size, seq_len, max(N)]
-        n = torch.arange(max(self.N)).unsqueeze(0).unsqueeze(0)  # shape: [1, 1, max(N)]
-        for j in range(len(self.N)):  # loop over seasonal components
-            # import ipdb; ipdb.set_trace()
-            cos_terms = torch.cos(
-                2 * np.pi * (n[..., : self.N[j]] + 1) * t[..., : self.N[j]] / self.P[j]
-            )  # shape: [batch_size, seq_len, N[j]]
-            sin_terms = torch.sin(
-                2 * np.pi * (n[..., : self.N[j]] + 1) * t[..., : self.N[j]] / self.P[j]
-            )  # shape: [batch_size, seq_len, N[j]]
-            output += torch.matmul(cos_terms, self.a[: self.N[j], j]) + torch.matmul(
-                sin_terms, self.b[: self.N[j], j]
-            )
-        return output
-
-
-class moving_avg(nn.Module):
-    """
-    Moving average block to highlight the trend of time series
-    """
-
-    def __init__(self, kernel_size, stride):
-        super(moving_avg, self).__init__()
-        self.kernel_size = kernel_size
-        self.avg = nn.AvgPool1d(kernel_size=kernel_size, stride=stride, padding=0)
-
-    def forward(self, x):
-        # padding on the both ends of time series
-        front = x[:, 0:1, :].repeat(1, (self.kernel_size - 1) // 2, 1)
-        end = x[:, -1:, :].repeat(1, (self.kernel_size - 1) // 2, 1)
-        x = torch.cat([front, x, end], dim=1)
-        x = self.avg(x.permute(0, 2, 1))
-        x = x.permute(0, 2, 1)
-        return x
+from .MovingAverage import MovingAverage
+from .MultiFourier import MultiFourier
 
 
 class TEMPO(nn.Module):
+    """
+    TODO: create docstring for TEMPO class
+    """
+
     def __init__(self, configs):
         super(TEMPO, self).__init__()
         self.is_gpt = configs.is_gpt
@@ -104,48 +35,45 @@ class TEMPO(nn.Module):
         self.pretrain = configs.pretrain
         self.stride = configs.stride
         self.patch_num = (configs.seq_len - self.patch_size) // self.stride + 1
-        self.mul_season = MultiFourier([2], [24 * 4])  # , [ 24, 24*4])
+        self.mul_season = MultiFourier([2], [24 * 4])
         self.seq_len = configs.seq_len
         self.padding_patch_layer = nn.ReplicationPad1d((0, self.stride))
         self.patch_num += 1
         self.distr_output = StudentTOutput()
         self.hidden_dim = configs.d_model
         # self.mlp = configs.mlp
-
+        self.criterion = nn.MSELoss()
         self.map_trend = nn.Linear(configs.seq_len, configs.seq_len)
         self.map_season = nn.Sequential(
             nn.Linear(configs.seq_len, 4 * configs.seq_len),
             nn.ReLU(),
             nn.Linear(4 * configs.seq_len, configs.seq_len),
         )
-
         # #self.map_season = nn.Linear(configs.seq_len, configs.seq_len)
         self.map_resid = nn.Linear(configs.seq_len, configs.seq_len)
-
-        kernel_size = 25
-        self.moving_avg = moving_avg(kernel_size, stride=1)
+        self.moving_average = MovingAverage(kernel_size=25, stride=1)
 
         if configs.is_gpt:
             if configs.pretrain:
+                # load a pre-trained GPT-2 base model
                 self.gpt2_trend = GPT2Model.from_pretrained(
-                    "gpt2", output_attentions=True, output_hidden_states=True
-                )  # loads a pretrained GPT-2 base model
+                    "gpt2",
+                    output_attentions=True,
+                    output_hidden_states=True,
+                )
                 # self.gpt2_season = GPT2Model.from_pretrained('gpt2', output_attentions=True, output_hidden_states=True)  # loads a pretrained GPT-2 base model
                 # self.gpt2_noise = GPT2Model.from_pretrained('gpt2', output_attentions=True, output_hidden_states=True)  # loads a pretrained GPT-2 base model
             else:
-                print(
-                    "------------------No need to load pretrained GPT model------------------"
-                )
+                print("-" * 18 + "No need to load pretrained GPT model" + "-" * 18)
                 self.gpt2_trend = GPT2Model(GPT2Config())
                 # self.gpt2_season = GPT2Model(GPT2Config())
                 # self.gpt2_noise = GPT2Model(GPT2Config())
             self.gpt2_trend.h = self.gpt2_trend.h[: configs.gpt_layers]
-
             self.prompt = configs.prompt
-            #
             self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
             self.gpt2_trend_token = self.tokenizer(
-                text="Predict the future time step given the trend", return_tensors="pt"
+                text="Predict the future time step given the trend",
+                return_tensors="pt",
             )
             self.gpt2_season_token = self.tokenizer(
                 text="Predict the future time step given the season",
@@ -164,8 +92,7 @@ class TEMPO(nn.Module):
                     self.prompt_record_plot = {}
                     self.prompt_record_id = 0
                     self.diversify = True
-
-            except:
+            except Exception as _:
                 self.pool = False
 
             if self.pool:
@@ -199,59 +126,33 @@ class TEMPO(nn.Module):
         # self.out_layer_noise = nn.Linear(configs.d_model * self.patch_num, configs.pred_len)
 
         if configs.prompt == 1:
-            # print((configs.d_model+9) * self.patch_num)
             self.use_token = configs.use_token
-            if (
-                self.use_token == 1
-            ):  # if use prompt token's representation as the forecasting's information
-                self.out_layer_trend = nn.Linear(
-                    configs.d_model * (self.patch_num + self.token_len),
-                    configs.pred_len,
-                )
-                self.out_layer_season = nn.Linear(
-                    configs.d_model * (self.patch_num + self.token_len),
-                    configs.pred_len,
-                )
-                self.out_layer_noise = nn.Linear(
-                    configs.d_model * (self.patch_num + self.token_len),
-                    configs.pred_len,
-                )
+
+            # if use prompt token's representation as the forecasting's information
+            if self.use_token == 1:
+                in_features = configs.d_model * (self.patch_num + self.token_len)
+                out_features = configs.pred_len
             else:
-                self.out_layer_trend = nn.Linear(
-                    configs.d_model * self.patch_num, configs.pred_len
-                )
-                self.out_layer_season = nn.Linear(
-                    configs.d_model * self.patch_num, configs.pred_len
-                )
-                self.out_layer_noise = nn.Linear(
-                    configs.d_model * self.patch_num, configs.pred_len
-                )
-                # self.fre_len = configs.seq_len # // 2 + 1
-                # self.out_layer_noise_fre = ComplexLinear(self.fre_len, configs.pred_len)
-                # self.pred_len = configs.pred_len
-                # self.seq_len = configs.seq_len
+                in_features = configs.d_model * self.patch_num
+                out_features = configs.pred_len
+
+            self.out_layer_trend = nn.Linear(in_features, out_features)
+            self.out_layer_season = nn.Linear(in_features, out_features)
+            self.out_layer_noise = nn.Linear(in_features, out_features)
+            # self.fre_len = configs.seq_len # // 2 + 1
+            # self.out_layer_noise_fre = ComplexLinear(self.fre_len, configs.pred_len)
+            # self.pred_len = configs.pred_len
+            # self.seq_len = configs.seq_len
 
             self.prompt_layer_trend = nn.Linear(configs.d_model, configs.d_model)
             self.prompt_layer_season = nn.Linear(configs.d_model, configs.d_model)
             self.prompt_layer_noise = nn.Linear(configs.d_model, configs.d_model)
-
-            for layer in (
-                self.prompt_layer_trend,
-                self.prompt_layer_season,
-                self.prompt_layer_noise,
-            ):
-                # layer.to(device=device)
-                layer.train()
         else:
-            self.out_layer_trend = nn.Linear(
-                configs.d_model * self.patch_num, configs.pred_len
-            )
-            self.out_layer_season = nn.Linear(
-                configs.d_model * self.patch_num, configs.pred_len
-            )
-            self.out_layer_noise = nn.Linear(
-                configs.d_model * self.patch_num, configs.pred_len
-            )
+            in_features = configs.d_model * self.patch_num
+            out_features = configs.pred_len
+            self.out_layer_trend = nn.Linear(in_features, out_features)
+            self.out_layer_season = nn.Linear(in_features, out_features)
+            self.out_layer_noise = nn.Linear(in_features, out_features)
 
         if configs.freeze and configs.pretrain:
             for i, (name, param) in enumerate(self.gpt2_trend.named_parameters()):
@@ -271,23 +172,7 @@ class TEMPO(nn.Module):
         )
 
         self.gpt2_trend = get_peft_model(self.gpt2_trend, config)
-        print_trainable_parameters(self.gpt2_trend)
-
-        for layer in (
-            self.gpt2_trend,
-            self.in_layer_trend,
-            self.out_layer_trend,
-            self.in_layer_season,
-            self.out_layer_season,
-            self.in_layer_noise,
-            self.out_layer_noise,
-        ):
-            # layer.to(device=device)
-            layer.train()
-
-        for layer in (self.map_trend, self.map_season, self.map_resid):
-            # layer.to(device=device)
-            layer.train()
+        self.print_trainable_parameters(self.gpt2_trend)
 
         self.cnt = 0
 
@@ -337,7 +222,7 @@ class TEMPO(nn.Module):
             cfg = OmegaConf.load(config_path)
 
         # Initialize the model
-        model = cls(cfg, device)
+        model = cls(cfg)
 
         # Construct the full path to the checkpoint
         model_path = os.path.join(cfg.checkpoints, cfg.model_id)
@@ -507,24 +392,26 @@ class TEMPO(nn.Module):
             else:
                 return x
 
-    def forward(self, past_target, itr=0, trend=None, season=None, noise=None, test=False):
+    def forward(
+        self,
+        past_target,
+        itr=0,
+        trend=None,
+        season=None,
+        noise=None,
+        test=False,
+    ):
         """
         Computes a forward pass of the TEMPO model.
 
         Return:
             (mu, sigma, nu), loss_local if model is probabilistic
             outputs, loss_local if model is deterministic
-        """               
+        """
         # Ensure input is three dimensional (batch_size, seq_len, num_features)
-        if past_target.dim() == 1:
-            past_target = past_target[-336:]  # Shape becomes [336]
-
-            # Add batch and feature dimensions
-            past_target = past_target.unsqueeze(0).unsqueeze(-1)  # Now (1, 336, 1)
-            
-        elif past_target.dim() == 2:
+        if past_target.dim() < 3:
             past_target = torch.unsqueeze(past_target, -1)
-        
+
         # Get batch size (B), sequence length (L), and number of features (M)
         B, L, M = past_target.shape
 
@@ -532,7 +419,7 @@ class TEMPO(nn.Module):
         past_target = self.rev_in_trend(past_target, "norm")
 
         # Compute trend component
-        trend_local = self.moving_avg(past_target)
+        trend_local = self.moving_average(past_target)
 
         # Perform linear transformation on trend component
         trend_local = self.map_trend(trend_local.squeeze(2)).unsqueeze(2)
@@ -554,9 +441,9 @@ class TEMPO(nn.Module):
             season, _, _ = self.get_norm(season)
             noise, _, _ = self.get_norm(noise)
 
-            trend_local_l = criterion(trend, trend_local)
-            season_local_l = criterion(season, season_local)
-            noise_local_l = criterion(noise, noise_local)
+            trend_local_l = self.criterion(trend, trend_local)
+            season_local_l = self.criterion(season, season_local)
+            noise_local_l = self.criterion(noise, noise_local)
 
             loss_local = trend_local_l + season_local_l + noise_local_l
 
@@ -633,17 +520,18 @@ class TEMPO(nn.Module):
 
             # Convert outputs into Student's t-distribution parameters
             distr_args = args_proj(outputs)  # (mu, sigma, nu)
-            
-            loc = torch.zeros(size=(distr_args[0].shape[0], 1))
-            
-            scale = loc
+
+            mu = distr_args[0]
+
+            prediction_length = mu.size()[0]
+
+            loc = torch.zeros(prediction_length, 1)
+            scale = torch.zeros(prediction_length, 1)
 
             return distr_args, loc, scale
 
         # if self.loss_func == "prob":
         #     outputs = rearrange(outputs, "b l m-> b m l", b=B).squeeze()
-
-        #     # TODO: use outputs to create Student's t-distribution arguments
 
         #     print(f"Loss func: {self.loss_func}")
         #     print(f'outputs shape: {outputs.shape}')
@@ -662,20 +550,23 @@ class TEMPO(nn.Module):
         #     if test:
         #         return student_T_arguments, loss_local
         #     return student_T_arguments, loss_local
-        elif self.loss_func == "negative_binomial":
-            mu = F.softplus(self.mu(past_target)) + 1e-4  # Ensure mean is positive
-            alpha = F.softplus(self.alpha(past_target)) + 1e-4  # Ensure dispersion is positive
-            if test:
-                return (
-                    mu.permute(0, 2, 1),
-                    alpha.permute(0, 2, 1),
-                ), None  # Return to [Batch, Output length, Channel]
-            else:
-                return (mu.permute(0, 2, 1), alpha.permute(0, 2, 1)), loss_local
 
-        if test:
-            return outputs, loss_local
-        return outputs, loss_local
+        # elif self.loss_func == "negative_binomial":
+        #     mu = F.softplus(self.mu(past_target)) + 1e-4  # Ensure mean is positive
+        #     alpha = (
+        #         F.softplus(self.alpha(past_target)) + 1e-4
+        #     )  # Ensure dispersion is positive
+        #     if test:
+        #         return (
+        #             mu.permute(0, 2, 1),
+        #             alpha.permute(0, 2, 1),
+        #         ), None  # Return to [Batch, Output length, Channel]
+        #     else:
+        #         return (mu.permute(0, 2, 1), alpha.permute(0, 2, 1)), loss_local
+
+        # if test:
+        #     return outputs, loss_local
+        # return outputs, loss_local
 
     def set_to_target_length(self, x):
         """
@@ -831,16 +722,28 @@ class TEMPO(nn.Module):
             probabilistic_forecast = sample_negative_binomial(mu, alpha, num_samples)
 
         return probabilistic_forecast
-    
+
     def get_predictor(self, input_transform, prediction_length=96, batch_size=128):
         """
         Returns a GluonTS PyTorch predictor for performing inference.
         """
         return PyTorchPredictor(
-            prediction_length=prediction_length,  
-            input_names=["past_target"],  
-            prediction_net=self,  
-            batch_size=batch_size, 
-            input_transform=input_transform, 
-            forecast_generator=DistributionForecastGenerator(self.distr_output)
+            prediction_length=prediction_length,
+            input_names=["past_target"],
+            prediction_net=self,
+            batch_size=batch_size,
+            input_transform=input_transform,
+            forecast_generator=DistributionForecastGenerator(self.distr_output),
         )
+
+    def print_trainable_parameters(self, model):
+        trainable_params = 0
+        all_param = 0
+        for _, param in model.named_parameters():
+            all_param += param.numel()
+            if param.requires_grad:
+                trainable_params += param.numel()
+
+        print(f"Trainable params: {trainable_params} || All params: {all_param}")
+        print(f"Trainable params: {trainable_params} || All params: {all_param}")
+        print(f"Trainable params: {trainable_params} || All params: {all_param}")
